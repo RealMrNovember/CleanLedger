@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:live": "npm run build && node scripts/deploy-live.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.513.0",

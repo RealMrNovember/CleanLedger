@@ -1,5 +1,5 @@
-import type { ComponentType } from "react";
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Building2,
   Mail,
@@ -7,12 +7,55 @@ import {
   Phone,
   MapPin,
   User,
-  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { useAuth } from "@/context/AuthContext";
 
 export function SignupPage() {
+  const navigate = useNavigate();
+  const { signup } = useAuth();
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    companyName: "",
+    ownerName: "",
+    phone: "",
+    email: "",
+    city: "",
+    password: "",
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (
+      !form.companyName.trim() ||
+      !form.ownerName.trim() ||
+      !form.phone.trim() ||
+      !form.email.trim() ||
+      !form.password.trim()
+    ) {
+      setError("Lütfen zorunlu alanları doldurun.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await signup(form);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Kayıt başarısız.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const update = (key: keyof typeof form, value: string) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
   return (
     <div className="flex min-h-screen flex-col bg-surface">
       <Navbar />
@@ -20,9 +63,6 @@ export function SignupPage() {
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-lg">
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-mint to-trust text-white">
-              <Sparkles className="size-7" />
-            </div>
             <h1 className="text-2xl font-bold">Ücretsiz Hesap Oluşturun</h1>
             <p className="mt-2 text-muted">
               14 günlük deneme sürümü otomatik başlar — kredi kartı gerekmez
@@ -31,22 +71,76 @@ export function SignupPage() {
 
           <form
             className="rounded-2xl border border-slate-200/80 bg-white p-8 shadow-sm"
-            onSubmit={(e) => e.preventDefault()}
+            onSubmit={(e) => void handleSubmit(e)}
+            noValidate
           >
+            {error && (
+              <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                {error}
+              </p>
+            )}
             <div className="grid gap-5 sm:grid-cols-2">
-              <Field icon={Building2} label="Firma Adı" placeholder="Örn: Temiz Dükkan" className="sm:col-span-2" />
-              <Field icon={User} label="Yetkili Adı" placeholder="Ad Soyad" />
-              <Field icon={Phone} label="Telefon" placeholder="05XX XXX XX XX" type="tel" />
-              <Field icon={Mail} label="E-posta" placeholder="ornek@firma.com" type="email" className="sm:col-span-2" />
-              <Field icon={MapPin} label="Şehir" placeholder="İstanbul" />
-              <Field icon={Lock} label="Şifre" placeholder="••••••••" type="password" />
+              <InputField
+                icon={Building2}
+                label="Firma Adı"
+                required
+                value={form.companyName}
+                onChange={(v) => update("companyName", v)}
+                placeholder="Örn: Papatya Kuru Temizleme"
+                className="sm:col-span-2"
+              />
+              <InputField
+                icon={User}
+                label="Yetkili Adı"
+                required
+                value={form.ownerName}
+                onChange={(v) => update("ownerName", v)}
+                placeholder="Ad Soyad"
+              />
+              <InputField
+                icon={Phone}
+                label="Telefon"
+                required
+                type="tel"
+                value={form.phone}
+                onChange={(v) => update("phone", v)}
+                placeholder="05XX XXX XX XX"
+              />
+              <InputField
+                icon={Mail}
+                label="E-posta"
+                required
+                type="email"
+                value={form.email}
+                onChange={(v) => update("email", v)}
+                placeholder="ornek@firma.com"
+                className="sm:col-span-2"
+              />
+              <InputField
+                icon={MapPin}
+                label="Şehir"
+                value={form.city}
+                onChange={(v) => update("city", v)}
+                placeholder="İstanbul"
+              />
+              <InputField
+                icon={Lock}
+                label="Şifre"
+                required
+                type="password"
+                value={form.password}
+                onChange={(v) => update("password", v)}
+                placeholder="••••••••"
+              />
             </div>
 
             <button
               type="submit"
-              className="mt-6 h-12 w-full rounded-xl bg-gradient-to-r from-mint to-trust font-semibold text-white shadow-md transition hover:shadow-lg active:scale-[0.99]"
+              disabled={submitting}
+              className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-mint to-trust font-semibold text-white shadow-md transition hover:shadow-lg active:scale-[0.99] disabled:opacity-60"
             >
-              14 Gün Ücretsiz Başla
+              {submitting && <Loader2 className="size-5 animate-spin" />}
+              {submitting ? "Kaydediliyor..." : "14 Gün Ücretsiz Başla"}
             </button>
 
             <p className="mt-6 text-center text-sm text-muted">
@@ -56,11 +150,6 @@ export function SignupPage() {
               </Link>
             </p>
           </form>
-
-          <p className="mt-6 text-center text-xs text-muted">
-            Kayıt işlemi şu an UI önizlemesidir. Tam entegrasyon bir sonraki
-            fazda license.cicibyte.com ile bağlanacaktır.
-          </p>
         </div>
       </main>
 
@@ -69,26 +158,37 @@ export function SignupPage() {
   );
 }
 
-function Field({
+function InputField({
   icon: Icon,
   label,
+  value,
+  onChange,
   placeholder,
   type = "text",
+  required,
   className = "",
 }: {
-  icon: ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
+  value: string;
+  onChange: (v: string) => void;
   placeholder: string;
   type?: string;
+  required?: boolean;
   className?: string;
 }) {
   return (
     <div className={className}>
-      <label className="mb-2 block text-sm font-medium text-ink">{label}</label>
+      <label className="mb-2 block text-sm font-medium text-ink">
+        {label}
+        {required && <span className="text-red-500"> *</span>}
+      </label>
       <div className="relative">
         <Icon className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" />
         <input
           type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className="h-11 w-full rounded-xl border-2 border-slate-200 bg-surface pl-11 pr-4 text-sm outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20"
         />

@@ -19,3 +19,20 @@
     @apply bg-surface text-ink antialiased;
   }
 }
+
+.field-input {
+  height: 3rem;
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 2px solid #e2e8f0;
+  background: var(--color-surface);
+  padding-left: 3rem;
+  padding-right: 1rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field-input:focus {
+  border-color: #4ecdc4;
+  box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.2);
+}

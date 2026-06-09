@@ -33,3 +33,4 @@ npm-debug.log*
 .user.ini
 .well-known/
 /index.html
+apps/web/api/data/users.json

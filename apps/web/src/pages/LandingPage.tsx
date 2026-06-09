@@ -1,16 +1,14 @@
 import {
-  Download,
   WifiOff,
   Shirt,
   Sparkles,
   Shield,
   Clock,
-  ArrowRight,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { DownloadButton } from "@/components/DownloadButton";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
-import { DOWNLOAD_URL } from "@/lib/constants";
 
 const features = [
   {
@@ -66,16 +64,7 @@ export function LandingPage() {
           </p>
 
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <a
-              href={DOWNLOAD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group inline-flex h-16 items-center gap-3 rounded-2xl bg-gradient-to-r from-mint to-trust px-10 text-lg font-semibold text-white shadow-lg shadow-mint/25 transition hover:shadow-xl hover:shadow-mint/30 active:scale-[0.98]"
-            >
-              <Download className="size-6" />
-              Windows İçin İndir (.exe)
-              <ArrowRight className="size-5 transition group-hover:translate-x-0.5" />
-            </a>
+            <DownloadButton />
             <Link
               to="/signup"
               className="inline-flex h-16 items-center rounded-2xl border-2 border-slate-200 bg-white px-10 text-lg font-semibold text-ink transition hover:border-mint/40 hover:bg-mint-light/30"
@@ -126,15 +115,7 @@ export function LandingPage() {
             ömür boyu lisans ile tek seferde sahip olun.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <a
-              href={DOWNLOAD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-14 items-center gap-2 rounded-2xl bg-white px-8 font-semibold text-[#0f3d3a] transition hover:bg-mint-light"
-            >
-              <Download className="size-5" />
-              Hemen İndir
-            </a>
+            <DownloadButton variant="secondary" />
             <Link
               to="/login"
               className="inline-flex h-14 items-center rounded-2xl border border-white/30 px-8 font-semibold text-white transition hover:bg-white/10"
