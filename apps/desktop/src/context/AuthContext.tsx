@@ -163,8 +163,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const next = await loginRemote(email, password);
     if (!isValidSession(next)) {
-      throw new Error("Geçersiz oturum yanıtı alındı.");
+      throw new Error(
+        "Sunucu geçersiz oturum döndürdü. Hesap bilgileriniz eksik olabilir; destek ile iletişime geçin."
+      );
     }
+
     try {
       await verifyLicense();
     } catch (err) {
@@ -172,11 +175,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         err instanceof Error ? err.message : "Lisans doğrulaması başarısız.";
       console.warn("[CleanLedger] Lisans doğrulaması atlandı:", message);
     }
+
     persistSession(next);
-    const org = await syncOrganization(next);
+
+    let org: OrganizationSettings;
+    try {
+      org = await syncOrganization(next);
+    } catch (err) {
+      persistSession(null);
+      throw new Error(
+        err instanceof Error
+          ? `Giriş sonrası yerel kayıt başarısız: ${err.message}`
+          : "Giriş sonrası yerel kayıt başarısız."
+      );
+    }
+
     setSession(next);
     setOrganization(org);
-    await runSyncPull();
+
+    try {
+      await runSyncPull();
+    } catch (err) {
+      console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
+    }
     void runSyncPush();
   }, []);
 
