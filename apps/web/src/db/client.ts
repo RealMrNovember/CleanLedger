@@ -5,6 +5,7 @@ import type {
   Coupon,
   Order,
   OrderItem,
+  OrderPayment,
   ServiceType,
   ServicePrice,
   PaymentStatus,
@@ -39,6 +40,7 @@ export interface LocalDb {
   servicePrices: ServicePrice[];
   orders: Order[];
   orderItems: OrderItem[];
+  orderPayments: OrderPayment[];
   nextProductId: number;
   nextCustomerId: number;
   nextCustomerTagId: number;
@@ -46,6 +48,7 @@ export interface LocalDb {
   nextServicePriceId: number;
   nextOrderId: number;
   nextOrderItemId: number;
+  nextOrderPaymentId: number;
   nextOrderNumber: number;
 }
 
@@ -68,6 +71,7 @@ function emptyDb(): LocalDb {
     servicePrices: [],
     orders: [],
     orderItems: [],
+    orderPayments: [],
     nextProductId: 1,
     nextCustomerId: 1,
     nextCustomerTagId: tags.length + 1,
@@ -75,6 +79,7 @@ function emptyDb(): LocalDb {
     nextServicePriceId: 1,
     nextOrderId: 1,
     nextOrderItemId: 1,
+    nextOrderPaymentId: 1,
     nextOrderNumber: 1,
   };
 }
@@ -95,6 +100,10 @@ function migrateLegacyDb(parsed: Record<string, unknown>): LocalDb {
     orders: (Array.isArray(parsed.orders) ? parsed.orders : []).map((o) =>
       mapOrder(o as Record<string, unknown>)
     ),
+    orderPayments: Array.isArray(parsed.orderPayments)
+      ? (parsed.orderPayments as OrderPayment[])
+      : [],
+    nextOrderPaymentId: num(parsed.nextOrderPaymentId, 1),
     nextCustomerTagId: num(parsed.nextCustomerTagId, base.nextCustomerTagId),
     nextCouponId: num(parsed.nextCouponId, 1),
   };
@@ -118,7 +127,11 @@ function loadLocalDb(): LocalDb {
     if (!Array.isArray(parsed.customerTags)) {
       return migrateLegacyDb(parsed);
     }
-    return parsed as unknown as LocalDb;
+    const db = parsed as unknown as LocalDb;
+    if (!Array.isArray(db.orderPayments)) db.orderPayments = [];
+    if (!db.nextOrderPaymentId) db.nextOrderPaymentId = 1;
+    backfillOrderPayments(db);
+    return db;
   } catch {
     return emptyDb();
   }
@@ -313,6 +326,174 @@ export function mapOrderItem(row: Record<string, unknown>): OrderItem {
   };
 }
 
+export function mapOrderPayment(row: Record<string, unknown>): OrderPayment {
+  let paymentMethod = String(
+    row.payment_method ?? row.paymentMethod ?? "cash"
+  ) as PaymentMethod;
+  if (paymentMethod !== "cash" && paymentMethod !== "card") {
+    paymentMethod = "cash";
+  }
+  return {
+    id: num(row.id),
+    orderId: num(row.order_id ?? row.orderId),
+    amount: num(row.amount),
+    paymentMethod,
+    createdAt: String(row.created_at ?? row.createdAt ?? ""),
+    refunded: num(row.refunded, 0),
+  };
+}
+
+function backfillOrderPayments(db: LocalDb): void {
+  for (const order of db.orders) {
+    const active = db.orderPayments.filter(
+      (p) => p.orderId === order.id && !p.refunded
+    );
+    const recorded = active.reduce((s, p) => s + p.amount, 0);
+    if (order.amountPaid > recorded + 0.001) {
+      db.orderPayments.push({
+        id: db.nextOrderPaymentId++,
+        orderId: order.id,
+        amount: order.amountPaid - recorded,
+        paymentMethod: order.paymentMethod,
+        createdAt: order.createdAt,
+        refunded: 0,
+      });
+    }
+  }
+}
+
+async function adjustCustomerCredit(
+  customerId: number | null,
+  customerPhone: string,
+  delta: number
+): Promise<void> {
+  if (Math.abs(delta) < 0.001) return;
+  let cid = customerId;
+  if (!cid) {
+    const c = await getCustomerByPhone(customerPhone);
+    cid = c?.id ?? null;
+  }
+  if (!cid) return;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<{ credit_balance: number }>(
+      "SELECT credit_balance FROM customers WHERE id = ?",
+      [cid]
+    );
+    const next = Math.max(0, (rows[0]?.credit_balance ?? 0) + delta);
+    await db.execute("UPDATE customers SET credit_balance = ? WHERE id = ?", [
+      next,
+      cid,
+    ]);
+    return;
+  }
+
+  const local = loadLocalDb();
+  const c = local.customers.find((x) => x.id === cid);
+  if (c) {
+    c.creditBalance = Math.max(0, c.creditBalance + delta);
+    saveLocalDb(local);
+  }
+}
+
+async function syncOrderPaymentTotals(
+  orderId: number,
+  orderPatch: {
+    amountPaid: number;
+    balanceDue: number;
+    paymentStatus: PaymentStatus;
+    paymentMethod?: PaymentMethod;
+  }
+): Promise<void> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    if (orderPatch.paymentMethod) {
+      await db.execute(
+        `UPDATE orders SET amount_paid = ?, balance_due = ?, payment_status = ?, payment_method = ? WHERE id = ?`,
+        [
+          orderPatch.amountPaid,
+          orderPatch.balanceDue,
+          orderPatch.paymentStatus,
+          orderPatch.paymentMethod,
+          orderId,
+        ]
+      );
+    } else {
+      await db.execute(
+        `UPDATE orders SET amount_paid = ?, balance_due = ?, payment_status = ? WHERE id = ?`,
+        [
+          orderPatch.amountPaid,
+          orderPatch.balanceDue,
+          orderPatch.paymentStatus,
+          orderId,
+        ]
+      );
+    }
+    return;
+  }
+
+  const local = loadLocalDb();
+  const o = local.orders.find((x) => x.id === orderId);
+  if (!o) return;
+  o.amountPaid = orderPatch.amountPaid;
+  o.balanceDue = orderPatch.balanceDue;
+  o.paymentStatus = orderPatch.paymentStatus;
+  if (orderPatch.paymentMethod) o.paymentMethod = orderPatch.paymentMethod;
+  saveLocalDb(local);
+}
+
+async function insertOrderPaymentRecord(
+  orderId: number,
+  amount: number,
+  paymentMethod: PaymentMethod,
+  createdAt: string
+): Promise<OrderPayment> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      `INSERT INTO order_payments (order_id, amount, payment_method, created_at, refunded)
+       VALUES (?, ?, ?, ?, 0)`,
+      [orderId, amount, paymentMethod, createdAt]
+    );
+    return {
+      id: result.lastInsertId,
+      orderId,
+      amount,
+      paymentMethod,
+      createdAt,
+      refunded: 0,
+    };
+  }
+
+  const local = loadLocalDb();
+  const payment: OrderPayment = {
+    id: local.nextOrderPaymentId++,
+    orderId,
+    amount,
+    paymentMethod,
+    createdAt,
+    refunded: 0,
+  };
+  local.orderPayments.push(payment);
+  saveLocalDb(local);
+  return payment;
+}
+
+async function getOrderById(orderId: number): Promise<Order | null> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM orders WHERE id = ?",
+      [orderId]
+    );
+    return rows[0] ? mapOrder(rows[0]) : null;
+  }
+  const local = loadLocalDb();
+  const o = local.orders.find((x) => x.id === orderId);
+  return o ? mapOrder(o as unknown as Record<string, unknown>) : null;
+}
+
 export function defaultPriceForService(
   basePrice: number,
   serviceType: ServiceType
@@ -496,6 +677,45 @@ async function runMigrations(): Promise<void> {
   await db.execute(
     `UPDATE orders SET priority = 'normal' WHERE priority IS NULL OR priority = ''`
   );
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS order_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      payment_method TEXT NOT NULL DEFAULT 'cash',
+      created_at TEXT NOT NULL,
+      refunded INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+    )
+  `);
+
+  const ordersNeedingPayments = await db.select<{
+    id: number;
+    amount_paid: number;
+    payment_method: string;
+    created_at: string;
+  }>(
+    `SELECT o.id, o.amount_paid, o.payment_method, o.created_at
+     FROM orders o
+     WHERE o.amount_paid > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM order_payments p
+         WHERE p.order_id = o.id AND p.refunded = 0
+       )`
+  );
+  for (const row of ordersNeedingPayments) {
+    await db.execute(
+      `INSERT INTO order_payments (order_id, amount, payment_method, created_at, refunded)
+       VALUES (?, ?, ?, ?, 0)`,
+      [
+        row.id,
+        row.amount_paid,
+        row.payment_method ?? "cash",
+        row.created_at,
+      ]
+    );
+  }
 }
 
 async function seedServicePricesForProduct(
@@ -991,6 +1211,15 @@ export async function createOrder(
 
     if (customerId) await applyCreditToCustomer(customerId);
 
+    if (amountPaid > 0) {
+      await insertOrderPaymentRecord(
+        orderId,
+        amountPaid,
+        paymentMethod,
+        createdAt
+      );
+    }
+
     triggerSyncPush();
     return {
       order: {
@@ -1054,6 +1283,17 @@ export async function createOrder(
   if (customerId) {
     const c = local.customers.find((x) => x.id === customerId);
     if (c && balanceDue > 0) c.creditBalance += balanceDue;
+  }
+
+  if (amountPaid > 0) {
+    local.orderPayments.push({
+      id: local.nextOrderPaymentId++,
+      orderId,
+      amount: amountPaid,
+      paymentMethod,
+      createdAt,
+      refunded: 0,
+    });
   }
 
   saveLocalDb(local);
@@ -1199,6 +1439,102 @@ export async function getOrderDashboardStats(): Promise<OrderDashboardStats> {
   };
 }
 
+export async function getOrderPayments(orderId: number): Promise<OrderPayment[]> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM order_payments WHERE order_id = ? ORDER BY created_at DESC, id DESC",
+      [orderId]
+    );
+    return rows.map(mapOrderPayment);
+  }
+  return loadLocalDb()
+    .orderPayments.filter((p) => p.orderId === orderId)
+    .sort(
+      (a, b) =>
+        b.createdAt.localeCompare(a.createdAt) || b.id - a.id
+    );
+}
+
+export async function addOrderPayment(
+  orderId: number,
+  amount: number,
+  paymentMethod: PaymentMethod
+): Promise<OrderPayment> {
+  const order = await getOrderById(orderId);
+  if (!order) throw new Error("Sipariş bulunamadı");
+
+  const payAmount = Math.min(Math.max(0, amount), order.balanceDue);
+  if (payAmount <= 0) throw new Error("Ödenecek tutar yok");
+
+  const createdAt = new Date().toISOString();
+  const payment = await insertOrderPaymentRecord(
+    orderId,
+    payAmount,
+    paymentMethod,
+    createdAt
+  );
+
+  const amountPaid = order.amountPaid + payAmount;
+  const balanceDue = Math.max(0, order.totalAmount - amountPaid);
+  const paymentStatus: PaymentStatus = balanceDue <= 0 ? "paid" : "unpaid";
+
+  await syncOrderPaymentTotals(orderId, {
+    amountPaid,
+    balanceDue,
+    paymentStatus,
+    paymentMethod,
+  });
+  await adjustCustomerCredit(order.customerId, order.customerPhone, -payAmount);
+
+  triggerSyncPush();
+  return payment;
+}
+
+export async function refundOrderPayment(paymentId: number): Promise<void> {
+  let payment: OrderPayment | null = null;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM order_payments WHERE id = ?",
+      [paymentId]
+    );
+    payment = rows[0] ? mapOrderPayment(rows[0]) : null;
+    if (!payment || payment.refunded) throw new Error("Ödeme kaydı bulunamadı");
+    await db.execute("UPDATE order_payments SET refunded = 1 WHERE id = ?", [
+      paymentId,
+    ]);
+  } else {
+    const local = loadLocalDb();
+    payment = local.orderPayments.find((p) => p.id === paymentId) ?? null;
+    if (!payment || payment.refunded) throw new Error("Ödeme kaydı bulunamadı");
+    payment.refunded = 1;
+    saveLocalDb(local);
+  }
+
+  const order = await getOrderById(payment.orderId);
+  if (!order) return;
+
+  const amountPaid = Math.max(0, order.amountPaid - payment.amount);
+  const balanceDue = Math.max(0, order.totalAmount - amountPaid);
+  const paymentStatus: PaymentStatus = balanceDue <= 0 ? "paid" : "unpaid";
+
+  await syncOrderPaymentTotals(payment.orderId, {
+    amountPaid,
+    balanceDue,
+    paymentStatus,
+  });
+  await adjustCustomerCredit(
+    order.customerId,
+    order.customerPhone,
+    payment.amount
+  );
+
+  triggerSyncPush();
+}
+
+/** @deprecated use addOrderPayment for partial payments */
 export async function updateOrderPaymentStatus(
   orderId: number,
   paymentStatus: PaymentStatus
@@ -1712,6 +2048,11 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
   const orderItems = (
     await db.select<Record<string, unknown>>("SELECT * FROM order_items ORDER BY id")
   ).map(mapOrderItem);
+  const orderPayments = (
+    await db.select<Record<string, unknown>>(
+      "SELECT * FROM order_payments ORDER BY id"
+    )
+  ).map(mapOrderPayment);
 
   const maxId = (arr: { id: number }[], fallback: number) =>
     arr.length ? Math.max(...arr.map((x) => x.id)) + 1 : fallback;
@@ -1724,6 +2065,7 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
     servicePrices,
     orders,
     orderItems,
+    orderPayments,
     nextProductId: maxId(products, 1),
     nextCustomerId: maxId(customers, 1),
     nextCustomerTagId: maxId(customerTags, 5),
@@ -1731,6 +2073,7 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
     nextServicePriceId: maxId(servicePrices, 1),
     nextOrderId: maxId(orders, 1),
     nextOrderItemId: maxId(orderItems, 1),
+    nextOrderPaymentId: maxId(orderPayments, 1),
     nextOrderNumber: orders.length + 1,
   };
 }
@@ -1738,6 +2081,7 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
 async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
   const db = await getSqlDb();
   await db.execute("DELETE FROM order_items");
+  await db.execute("DELETE FROM order_payments");
   await db.execute("DELETE FROM orders");
   await db.execute("DELETE FROM service_prices");
   await db.execute("DELETE FROM customers");
@@ -1815,6 +2159,20 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
     await db.execute(
       "INSERT INTO order_items (id, order_id, product_id, service_type, subtotal) VALUES (?, ?, ?, ?, ?)",
       [i.id, i.orderId, i.productId, i.serviceType, i.subtotal]
+    );
+  }
+  for (const p of data.orderPayments ?? []) {
+    await db.execute(
+      `INSERT INTO order_payments (id, order_id, amount, payment_method, created_at, refunded)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        p.id,
+        p.orderId,
+        p.amount,
+        p.paymentMethod,
+        p.createdAt,
+        p.refunded ?? 0,
+      ]
     );
   }
 }
