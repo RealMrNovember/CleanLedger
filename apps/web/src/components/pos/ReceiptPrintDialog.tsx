@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/Logo";
+import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import {
   buildReceiptSummaryRows,
   formatReceiptLineLabel,
@@ -52,12 +53,7 @@ export function ReceiptPrintDialog({
 
   if (!receipt) return null;
 
-  const shop = receipt.shopContact ?? {
-    companyName: receipt.companyName,
-    phone: "+90 535 489 50 50",
-    email: "destek@cicibyte.com",
-    address: "www.cicibyte.com",
-  };
+  const shop = receipt.shopContact ?? shopProfileToContact(getShopProfile());
 
   const today = new Date().toLocaleDateString("tr-TR", {
     day: "2-digit",

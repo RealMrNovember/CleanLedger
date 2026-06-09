@@ -17,8 +17,8 @@ import {
   validateCouponCode,
 } from "@/db/client";
 import { formatCustomerName } from "@/lib/utils";
+import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import { useCatalog } from "@/hooks/useCatalog";
-import { useAuth } from "@/context/AuthContext";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
 import { CustomerPanel } from "@/components/pos/CustomerPanel";
 import { CustomerPickerDialog } from "@/components/pos/CustomerPickerDialog";
@@ -36,7 +36,6 @@ function newLineKey(): string {
 
 export function PosScreen() {
   const { products, loading, refresh } = useCatalog();
-  const { user } = useAuth();
   const [phone, setPhone] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -181,8 +180,10 @@ export function PosScreen() {
         const fullName = customer
           ? formatCustomerName(customer)
           : [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
-        const paid = Math.min(Math.max(0, amountPaid), total);
-        const { order } = await createOrder({
+      const paid = Math.min(Math.max(0, amountPaid), total);
+      const shop = getShopProfile();
+      const shopContact = shopProfileToContact(shop);
+      const { order } = await createOrder({
           customerPhone: trimmedPhone,
           customerId: customer?.id ?? null,
           amountPaid: paid,
@@ -200,7 +201,7 @@ export function PosScreen() {
         setSavedOrder(order);
         setSavedReceipt({
           order,
-          companyName: user?.companyName ?? "CleanLedger",
+          companyName: shop.companyName,
           customerPhone: trimmedPhone,
           customerName: fullName,
           lines: cart.map((line) => ({
@@ -211,11 +212,7 @@ export function PosScreen() {
           discountAmount,
           amountPaid: paid,
           balanceDue: order.balanceDue,
-          shopContact: {
-            companyName: user?.companyName ?? "CleanLedger",
-            phone: user?.phone,
-            email: user?.email,
-          },
+          shopContact,
         });
         setPaymentDialogOpen(false);
         setShowSuccess(true);
@@ -238,9 +235,6 @@ export function PosScreen() {
       priority,
       total,
       refresh,
-      user?.companyName,
-      user?.phone,
-      user?.email,
     ]
   );
 

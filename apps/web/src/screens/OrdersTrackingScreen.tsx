@@ -261,7 +261,13 @@ export function OrdersTrackingScreen() {
                     </button>
                   )}
                   <Badge
-                    variant={order.paymentStatus === "paid" ? "paid" : "unpaid"}
+                    variant={
+                      order.paymentStatus === "paid"
+                        ? "paid"
+                        : order.paymentStatus === "partial"
+                          ? "partial"
+                          : "unpaid"
+                    }
                   >
                     {PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus]}
                   </Badge>
@@ -537,7 +543,7 @@ function Badge({
   variant,
   children,
 }: {
-  variant: "status" | "paid" | "unpaid" | "urgent";
+  variant: "status" | "paid" | "partial" | "unpaid" | "urgent";
   children: ReactNode;
 }) {
   return (
@@ -545,7 +551,8 @@ function Badge({
       className={cn(
         "rounded-lg px-2 py-0.5 text-xs font-medium",
         variant === "paid" && "bg-mint-light text-[#0f3d3a]",
-        variant === "unpaid" && "bg-[#fff4e6] text-[#b45309]",
+        variant === "partial" && "bg-[#fff4e6] text-[#b45309]",
+        variant === "unpaid" && "bg-slate-100 text-slate-700",
         variant === "status" && "bg-trust-light text-trust",
         variant === "urgent" &&
           "bg-gradient-to-r from-[#e85d04] to-[#f48c06] font-bold uppercase tracking-wide text-white shadow-sm"

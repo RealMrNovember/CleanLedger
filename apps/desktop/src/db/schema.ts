@@ -107,8 +107,18 @@ export type OrganizationSettings = typeof organizationSettings.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type OrderPayment = typeof orderPayments.$inferSelect;
 
-export type PaymentStatus = "paid" | "unpaid";
+export type PaymentStatus = "paid" | "partial" | "unpaid";
 export type PaymentMethod = "cash" | "card";
+
+/** Tutar ve bakiyeye göre ödeme statüsünü hesaplar (OrderPayment kayıtlarıyla uyumlu). */
+export function derivePaymentStatus(
+  amountPaid: number,
+  totalAmount: number
+): PaymentStatus {
+  if (amountPaid <= 0) return "unpaid";
+  if (amountPaid >= totalAmount - 0.001) return "paid";
+  return "partial";
+}
 export type OrderStatus = "preparing" | "ready" | "delivered";
 export type OrderPriority = "normal" | "urgent";
 export type CouponType = "percent" | "fixed";
@@ -116,7 +126,8 @@ export type TagColor = "slate" | "yellow" | "gold" | "red" | "mint" | "trust";
 
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   paid: "Ödendi",
-  unpaid: "Cari / Kısmi",
+  partial: "Kısmi Ödeme",
+  unpaid: "Cari / Ödenmedi",
 };
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {

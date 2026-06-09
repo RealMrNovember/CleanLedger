@@ -9,15 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { HelpSection } from "@/components/settings/HelpSection";
+import { GeneralSettingsPanel } from "@/components/settings/GeneralSettingsPanel";
 import { ProductManagementPanel } from "@/components/settings/ProductManagementPanel";
 import { CustomerTagsPanel } from "@/components/settings/CustomerTagsPanel";
 import { CouponsPanel } from "@/components/settings/CouponsPanel";
 
-type SettingsTab = "prices" | "products" | "tags" | "coupons" | "help";
+type SettingsTab = "general" | "prices" | "products" | "tags" | "coupons" | "help";
 
 export function SettingsScreen() {
   const { products, servicePrices, refresh } = useCatalog();
-  const [tab, setTab] = useState<SettingsTab>("prices");
+  const [tab, setTab] = useState<SettingsTab>("general");
   const [saving, setSaving] = useState<string | null>(null);
 
   const getPrice = (productId: number, serviceType: ServiceType): number => {
@@ -47,6 +48,7 @@ export function SettingsScreen() {
   };
 
   const tabs: { id: SettingsTab; label: string }[] = [
+    { id: "general", label: "Genel" },
     { id: "prices", label: "Fiyat Yönetimi" },
     { id: "products", label: "Ürün Yönetimi" },
     { id: "tags", label: "Müşteri Etiketleri" },
@@ -74,8 +76,10 @@ export function SettingsScreen() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {tab === "prices" ? (
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        {tab === "general" ? (
+          <GeneralSettingsPanel />
+        ) : tab === "prices" ? (
           <Card className="mx-auto max-w-5xl">
             <CardHeader>
               <div>
