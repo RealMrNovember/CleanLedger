@@ -1,32 +1,73 @@
 import { useEffect, useState } from "react";
 import { Download, ArrowRight, Loader2 } from "lucide-react";
 
-const GITHUB_LATEST_API =
-  "https://api.github.com/repos/RealMrNovember/CleanLedger/releases/latest";
+const GITHUB_RELEASES_API =
+  "https://api.github.com/repos/RealMrNovember/CleanLedger/releases";
 
 interface ReleaseInfo {
   version: string;
   downloadUrl: string;
 }
 
-async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
-  const res = await fetch(GITHUB_LATEST_API);
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    tag_name?: string;
-    assets?: Array<{ name?: string; browser_download_url?: string }>;
-  };
-  const version = (data.tag_name ?? "latest").replace(/^v/i, "");
-  const exe =
-    data.assets?.find(
+function pickExeAsset(
+  assets?: Array<{ name?: string; browser_download_url?: string }>
+) {
+  return (
+    assets?.find(
       (a) =>
         a.name?.endsWith(".exe") &&
         !a.name?.includes("setup") &&
         !a.name?.includes("Setup")
-    ) ?? data.assets?.find((a) => a.name?.endsWith(".exe"));
-  const downloadUrl = exe?.browser_download_url ?? "";
-  if (!downloadUrl) return null;
-  return { version, downloadUrl };
+    ) ?? assets?.find((a) => a.name?.endsWith(".exe"))
+  );
+}
+
+async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
+  try {
+    const listRes = await fetch(GITHUB_RELEASES_API, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (listRes.ok) {
+      const releases = (await listRes.json()) as Array<{
+        tag_name?: string;
+        prerelease?: boolean;
+        assets?: Array<{ name?: string; browser_download_url?: string }>;
+      }>;
+
+      const semverRelease = releases.find(
+        (r) =>
+          /^v?\d+\.\d+\.\d+$/.test(r.tag_name ?? "") &&
+          pickExeAsset(r.assets)?.browser_download_url
+      );
+      const picked = semverRelease ?? releases[0];
+      if (picked) {
+        const exe = pickExeAsset(picked.assets);
+        if (exe?.browser_download_url) {
+          return {
+            version: (picked.tag_name ?? "latest").replace(/^v/i, ""),
+            downloadUrl: exe.browser_download_url,
+          };
+        }
+      }
+    }
+  } catch {
+    /* fallback below */
+  }
+
+  const latestRes = await fetch(`${GITHUB_RELEASES_API}/latest`, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!latestRes.ok) return null;
+  const data = (await latestRes.json()) as {
+    tag_name?: string;
+    assets?: Array<{ name?: string; browser_download_url?: string }>;
+  };
+  const exe = pickExeAsset(data.assets);
+  if (!exe?.browser_download_url) return null;
+  return {
+    version: (data.tag_name ?? "latest").replace(/^v/i, ""),
+    downloadUrl: exe.browser_download_url,
+  };
 }
 
 interface DownloadButtonProps {
@@ -66,7 +107,7 @@ export function DownloadButton({
         target="_blank"
         rel="noopener noreferrer"
         aria-disabled={loading || !release}
-        className={`inline-flex h-14 items-center gap-2 rounded-2xl bg-white px-8 font-semibold text-[#0f3d3a] transition hover:bg-mint-light disabled:pointer-events-none disabled:opacity-60 ${className}`}
+        className={`inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-mint to-trust font-semibold text-white shadow-md transition hover:opacity-95 disabled:pointer-events-none disabled:opacity-60 sm:w-auto sm:px-8 ${className}`}
         onClick={(e) => {
           if (loading || !release) e.preventDefault();
         }}
@@ -76,7 +117,11 @@ export function DownloadButton({
         ) : (
           <Download className="size-5" />
         )}
-        {loading ? "Sürüm kontrol ediliyor..." : "Hemen İndir"}
+        {loading
+          ? "Sürüm kontrol ediliyor..."
+          : release
+            ? `Windows Uygulamasını İndir — v${release.version}`
+            : "İndirme linki alınamadı"}
       </a>
     );
   }

@@ -45,7 +45,7 @@ export function SignupPage() {
     setSubmitting(true);
     try {
       await signup(form);
-      navigate("/dashboard", { replace: true });
+      navigate("/dashboard/pos", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kayıt başarısız.");
     } finally {

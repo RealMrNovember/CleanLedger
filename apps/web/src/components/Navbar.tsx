@@ -15,7 +15,7 @@ export function Navbar() {
         <nav className="flex items-center gap-3">
           {user ? (
             <Link
-              to="/dashboard"
+              to="/dashboard/pos"
               className="rounded-xl bg-mint-light px-4 py-2.5 text-sm font-semibold text-[#0f3d3a]"
             >
               Panelim

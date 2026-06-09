@@ -34,3 +34,5 @@ npm-debug.log*
 .well-known/
 /index.html
 apps/web/api/data/users.json
+apps/web/api/data/sync/*.json
+apps/web/api/config.local.php
