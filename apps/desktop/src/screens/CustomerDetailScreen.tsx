@@ -14,7 +14,7 @@ import { CustomerTagBadge } from "@/components/CustomerTagBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCustomerName } from "@/lib/utils";
 
 export function CustomerDetailScreen() {
   const { id } = useParams();
@@ -28,6 +28,7 @@ export function CustomerDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     name: "",
+    lastName: "",
     phone: "",
     notes: "",
     address: "",
@@ -48,6 +49,7 @@ export function CustomerDetailScreen() {
     setTags(tagList);
     setForm({
       name: c.name,
+      lastName: c.lastName ?? "",
       phone: c.phone,
       notes: c.notes ?? "",
       address: c.address ?? "",
@@ -89,7 +91,7 @@ export function CustomerDetailScreen() {
         </Button>
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-bold">{customer.name}</h1>
+            <h1 className="text-2xl font-bold">{formatCustomerName(customer)}</h1>
             <CustomerTagBadge tag={tag} />
           </div>
           <p className="text-sm text-muted-foreground">{customer.phone}</p>
@@ -117,6 +119,11 @@ export function CustomerDetailScreen() {
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="Ad"
+                />
+                <Input
+                  value={form.lastName}
+                  onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                  placeholder="Soyad"
                 />
                 <Input
                   value={form.phone}
@@ -152,6 +159,7 @@ export function CustomerDetailScreen() {
               </>
             ) : (
               <>
+                <InfoRow icon={Phone} label="Ad Soyad" value={formatCustomerName(customer)} />
                 <InfoRow icon={Phone} label="Telefon" value={customer.phone} />
                 <InfoRow
                   icon={MapPin}

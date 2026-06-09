@@ -26,6 +26,7 @@ export const coupons = sqliteTable("coupons", {
 export const customers = sqliteTable("customers", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
+  lastName: text("last_name").default(""),
   phone: text("phone").notNull().unique(),
   notes: text("notes").default(""),
   address: text("address").default(""),

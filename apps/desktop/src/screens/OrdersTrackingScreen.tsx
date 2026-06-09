@@ -190,10 +190,23 @@ export function OrdersTrackingScreen() {
                     {formatCurrency(order.totalAmount)}
                   </p>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Badge variant="status">
                     {ORDER_STATUS_LABELS[order.orderStatus as OrderStatus]}
                   </Badge>
+                  {order.orderStatus === "ready" && tab === "active" && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleMarkPreparing(order.id);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-xs font-semibold text-foreground hover:bg-muted/80"
+                    >
+                      <RotateCcw className="size-3" />
+                      Hazırlanıyor&apos;a Al
+                    </button>
+                  )}
                   <Badge
                     variant={order.paymentStatus === "paid" ? "paid" : "unpaid"}
                   >

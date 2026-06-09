@@ -25,6 +25,7 @@ import {
 } from "./schema";
 import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
+import { formatCustomerName } from "@/lib/utils";
 
 const STORAGE_KEY = "cleanledger_web_db_v2";
 const LEGACY_STORAGE_KEY = "cleanledger_web_db_v1";
@@ -201,6 +202,7 @@ export function mapCustomer(row: Record<string, unknown>): Customer {
   return {
     id: num(row.id),
     name: String(row.name ?? ""),
+    lastName: String(row.last_name ?? row.lastName ?? ""),
     phone: String(row.phone ?? ""),
     notes: String(row.notes ?? ""),
     address: String(row.address ?? ""),
@@ -442,6 +444,7 @@ async function runMigrations(): Promise<void> {
   const tagCols = [
     `ALTER TABLE customers ADD COLUMN tag_id INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE customers ADD COLUMN credit_balance REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE customers ADD COLUMN last_name TEXT DEFAULT ''`,
     `ALTER TABLE orders ADD COLUMN subtotal_amount REAL NOT NULL DEFAULT 0`,
     `ALTER TABLE orders ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0`,
     `ALTER TABLE orders ADD COLUMN amount_paid REAL NOT NULL DEFAULT 0`,
@@ -697,6 +700,7 @@ export function calculateServicePrice(
 
 export interface CustomerInput {
   name: string;
+  lastName?: string;
   phone: string;
   notes?: string;
   address?: string;
@@ -748,6 +752,7 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
   const tagId = input.tagId ?? 1;
   const data = {
     name: input.name.trim(),
+    lastName: input.lastName?.trim() ?? "",
     phone: input.phone.trim(),
     notes: input.notes?.trim() ?? "",
     address: input.address?.trim() ?? "",
@@ -760,10 +765,11 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
   if (isTauri()) {
     const db = await getSqlDb();
     const result = await db.execute(
-      `INSERT INTO customers (name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO customers (name, last_name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.name,
+        data.lastName,
         data.phone,
         data.notes,
         data.address,
@@ -793,9 +799,10 @@ export async function updateCustomer(
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute(
-      `UPDATE customers SET name = ?, phone = ?, notes = ?, address = ?, tag_id = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE customers SET name = ?, last_name = ?, phone = ?, notes = ?, address = ?, tag_id = ?, updated_at = ? WHERE id = ?`,
       [
         input.name.trim(),
+        input.lastName?.trim() ?? "",
         input.phone.trim(),
         input.notes?.trim() ?? "",
         input.address?.trim() ?? "",
@@ -811,6 +818,7 @@ export async function updateCustomer(
   const local = loadLocalDb();
   const c = local.customers.find((x) => x.id === id)!;
   c.name = input.name.trim();
+  c.lastName = input.lastName?.trim() ?? "";
   c.phone = input.phone.trim();
   c.notes = input.notes?.trim() ?? "";
   c.address = input.address?.trim() ?? "";
@@ -1054,14 +1062,31 @@ export async function createOrder(
 
 export async function upsertCustomerByPhone(
   phone: string,
-  name?: string
+  name?: string,
+  lastName?: string
 ): Promise<Customer | null> {
   const trimmed = phone.trim();
   if (!trimmed) return null;
   const existing = await getCustomerByPhone(trimmed);
-  if (existing) return existing;
+  if (existing) {
+    if (name?.trim() || lastName?.trim()) {
+      return updateCustomer(existing.id, {
+        name: name?.trim() || existing.name,
+        lastName: lastName?.trim() ?? existing.lastName ?? "",
+        phone: trimmed,
+        notes: existing.notes ?? "",
+        address: existing.address ?? "",
+        tagId: existing.tagId,
+      });
+    }
+    return existing;
+  }
   if (name?.trim()) {
-    return createCustomer({ name: name.trim(), phone: trimmed });
+    return createCustomer({
+      name: name.trim(),
+      lastName: lastName?.trim(),
+      phone: trimmed,
+    });
   }
   return null;
 }
@@ -1070,7 +1095,13 @@ export async function upsertCustomerByPhone(
 
 async function enrichOrders(orders: Order[]): Promise<OrderWithMeta[]> {
   const customers = await getCustomers();
-  const customerMap = new Map(customers.map((c) => [c.id, c.name]));
+  const customerMap = new Map(customers.map((c) => [c.id, c]));
+  const nameFor = (o: Order) => {
+    const c = o.customerId
+      ? customerMap.get(o.customerId)
+      : customers.find((x) => x.phone === o.customerPhone);
+    return c ? formatCustomerName(c) : undefined;
+  };
 
   if (isTauri()) {
     const db = await getSqlDb();
@@ -1083,9 +1114,7 @@ async function enrichOrders(orders: Order[]): Promise<OrderWithMeta[]> {
         return {
           ...o,
           itemCount: countRow[0]?.count ?? 0,
-          customerName: o.customerId
-            ? customerMap.get(o.customerId)
-            : customers.find((c) => c.phone === o.customerPhone)?.name,
+          customerName: nameFor(o),
         };
       })
     );
@@ -1095,9 +1124,7 @@ async function enrichOrders(orders: Order[]): Promise<OrderWithMeta[]> {
   return orders.map((o) => ({
     ...o,
     itemCount: local.orderItems.filter((i) => i.orderId === o.id).length,
-    customerName: o.customerId
-      ? customerMap.get(o.customerId)
-      : customers.find((c) => c.phone === o.customerPhone)?.name,
+    customerName: nameFor(o),
   }));
 }
 
@@ -1738,11 +1765,12 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
   }
   for (const c of data.customers) {
     await db.execute(
-      `INSERT INTO customers (id, name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO customers (id, name, last_name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         c.id,
         c.name,
+        c.lastName ?? "",
         c.phone,
         c.notes ?? "",
         c.address ?? "",

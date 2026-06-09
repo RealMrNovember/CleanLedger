@@ -6,8 +6,10 @@ import {
   getCustomerByPhone,
   getCustomerCreditDebt,
   getServicePrice,
+  upsertCustomerByPhone,
   validateCouponCode,
 } from "@/db/client";
+import { formatCustomerName } from "@/lib/utils";
 import { useCatalog } from "@/hooks/useCatalog";
 import { useAuth } from "@/context/AuthContext";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
@@ -27,7 +29,9 @@ export function PosScreen() {
   const { products, loading, refresh } = useCatalog();
   const { user } = useAuth();
   const [phone, setPhone] = useState("");
-  const [customerName, setCustomerName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [isRegistered, setIsRegistered] = useState(false);
   const [creditDebt, setCreditDebt] = useState(0);
   const [deliveryDate, setDeliveryDate] = useState(() =>
     toDateKey(addDaysToDate(new Date(), 3))
@@ -50,11 +54,21 @@ export function PosScreen() {
       const trimmed = phone.trim();
       if (trimmed.length >= 10) {
         const c = await getCustomerByPhone(trimmed);
-        setCustomerName(c?.name ?? "");
+        if (c) {
+          setFirstName(c.name);
+          setLastName(c.lastName ?? "");
+          setIsRegistered(true);
+        } else {
+          setFirstName("");
+          setLastName("");
+          setIsRegistered(false);
+        }
         const debt = await getCustomerCreditDebt(trimmed);
         setCreditDebt(debt);
       } else {
-        setCustomerName("");
+        setFirstName("");
+        setLastName("");
+        setIsRegistered(false);
         setCreditDebt(0);
       }
     }, 400);
@@ -146,14 +160,25 @@ export function PosScreen() {
       alert("Lütfen müşteri telefon numarasını girin.");
       return;
     }
+    if (!firstName.trim()) {
+      alert("Lütfen müşteri adını girin.");
+      return;
+    }
 
     setSaving(true);
     try {
-      const existing = await getCustomerByPhone(trimmedPhone);
+      const customer = await upsertCustomerByPhone(
+        trimmedPhone,
+        firstName.trim(),
+        lastName.trim()
+      );
+      const fullName = customer
+        ? formatCustomerName(customer)
+        : [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
       const paid = Math.min(Math.max(0, amountPaid), total);
       const { order } = await createOrder({
         customerPhone: trimmedPhone,
-        customerId: existing?.id ?? null,
+        customerId: customer?.id ?? null,
         amountPaid: paid,
         paymentMethod,
         couponCode: appliedCouponCode,
@@ -171,7 +196,7 @@ export function PosScreen() {
         order,
         companyName: user?.companyName ?? "CleanLedger",
         customerPhone: trimmedPhone,
-        customerName: customerName || existing?.name,
+        customerName: fullName,
         lines: cart.map((line) => ({
           productName: line.product.name,
           serviceLabel: SERVICE_LABELS[line.serviceType],
@@ -197,7 +222,8 @@ export function PosScreen() {
   }, [
     cart,
     phone,
-    customerName,
+    firstName,
+    lastName,
     amountPaid,
     paymentMethod,
     appliedCouponCode,
@@ -212,7 +238,9 @@ export function PosScreen() {
   const handleNewOrder = useCallback(() => {
     setCart([]);
     setPhone("");
-    setCustomerName("");
+    setFirstName("");
+    setLastName("");
+    setIsRegistered(false);
     setCreditDebt(0);
     setDeliveryDate(toDateKey(addDaysToDate(new Date(), 3)));
     setPriority("normal");
@@ -246,9 +274,13 @@ export function PosScreen() {
         <section className="max-h-[42vh] min-h-0 shrink-0 overflow-y-auto xl:max-h-none xl:shrink">
           <CustomerPanel
             phone={phone}
-            customerName={customerName}
+            firstName={firstName}
+            lastName={lastName}
+            isRegistered={isRegistered}
             creditDebt={creditDebt}
             onPhoneChange={setPhone}
+            onFirstNameChange={setFirstName}
+            onLastNameChange={setLastName}
             deliveryDate={deliveryDate}
             onDeliveryDateChange={setDeliveryDate}
             priority={priority}

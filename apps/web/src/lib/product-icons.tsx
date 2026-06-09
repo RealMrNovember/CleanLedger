@@ -1,82 +1,86 @@
 import {
   Shirt,
-  Briefcase,
   Layers,
-  Sparkles,
-  Bed,
+  Layers2,
+  Briefcase,
+  BriefcaseBusiness,
   BedDouble,
-  Blinds,
-  Crown,
-  Package,
+  Square,
+  LayoutGrid,
+  Lamp,
   Ribbon,
-  Wind,
-  Gem,
-  Footprints,
-  HardHat,
-  Grid2X2,
-  Bath,
-  ShoppingBag,
-  Scissors,
-  Watch,
-  Sofa,
+  Triangle,
+  Package,
   type LucideIcon,
 } from "lucide-react";
 
-/** icon_name → Lucide ikon eşlemesi */
+/** Kuru temizleme sektörü — 12 özel kategori ikonu (+ legacy eşleme) */
 const ICON_MAP: Record<string, LucideIcon> = {
   shirt: Shirt,
-  pants: Ribbon,
-  jacket: Briefcase,
-  skirt: Wind,
-  dress: Gem,
-  suit: Crown,
   coat: Layers,
-  sweater: Shirt,
-  tie: Scissors,
-  scarf: Sparkles,
-  bed: Bed,
+  jacket: Layers2,
+  tshirt: Shirt,
+  pants: Ribbon,
+  skirt: Triangle,
   blanket: BedDouble,
-  curtain: Blinds,
-  carpet: Grid2X2,
-  sofa: Sofa,
-  towel: Bath,
-  shoe: Footprints,
-  hat: HardHat,
-  bag: ShoppingBag,
-  watch: Watch,
-  sparkles: Sparkles,
+  tablecloth: Square,
+  carpet: LayoutGrid,
+  lamp: Lamp,
+  bag: Briefcase,
+  leather: BriefcaseBusiness,
   default: Package,
+  // legacy ürünler
+  jacket_old: Briefcase,
+  pants_old: Ribbon,
+  coat_old: Layers,
+  dress: Triangle,
+  skirt_old: Triangle,
+  bed: BedDouble,
+  curtain: Lamp,
+  sofa: Square,
+  towel: Square,
+  shoe: Briefcase,
+  hat: Briefcase,
+  bag_old: Briefcase,
+  watch: Briefcase,
+  sparkles: Lamp,
+  suit: Layers,
+  sweater: Shirt,
+  tie: Ribbon,
+  scarf: Lamp,
+  blanket_old: BedDouble,
+  carpet_old: LayoutGrid,
 };
 
 export interface ProductIconOption {
   id: string;
   label: string;
+  category: string;
   Icon: LucideIcon;
 }
 
+/** Sadece kuru temizlemeye uygun 12 ikon */
 export const PRODUCT_ICON_OPTIONS: ProductIconOption[] = [
-  { id: "shirt", label: "Gömlek", Icon: Shirt },
-  { id: "pants", label: "Pantolon", Icon: Ribbon },
-  { id: "jacket", label: "Ceket", Icon: Briefcase },
-  { id: "coat", label: "Palto", Icon: Layers },
-  { id: "dress", label: "Elbise", Icon: Gem },
-  { id: "skirt", label: "Etek", Icon: Wind },
-  { id: "suit", label: "Takım", Icon: Crown },
-  { id: "sweater", label: "Kazak", Icon: Shirt },
-  { id: "tie", label: "Kravat", Icon: Scissors },
-  { id: "scarf", label: "Eşarp", Icon: Sparkles },
-  { id: "bed", label: "Nevresim", Icon: Bed },
-  { id: "blanket", label: "Yorgan", Icon: BedDouble },
-  { id: "curtain", label: "Perde", Icon: Blinds },
-  { id: "carpet", label: "Halı", Icon: Grid2X2 },
-  { id: "sofa", label: "Koltuk", Icon: Sofa },
-  { id: "towel", label: "Havlu", Icon: Bath },
-  { id: "shoe", label: "Ayakkabı", Icon: Footprints },
-  { id: "hat", label: "Şapka", Icon: HardHat },
-  { id: "bag", label: "Çanta", Icon: ShoppingBag },
-  { id: "watch", label: "Saat", Icon: Watch },
-  { id: "default", label: "Genel", Icon: Package },
+  { id: "shirt", label: "Gömlek", category: "Üst Giyim", Icon: Shirt },
+  { id: "coat", label: "Palto", category: "Üst Giyim", Icon: Layers },
+  { id: "jacket", label: "Ceket", category: "Üst Giyim", Icon: Layers2 },
+  { id: "tshirt", label: "Tişört", category: "Üst Giyim", Icon: Shirt },
+  { id: "pants", label: "Pantolon", category: "Alt Giyim", Icon: Ribbon },
+  { id: "skirt", label: "Etek", category: "Alt Giyim", Icon: Triangle },
+  { id: "blanket", label: "Yorgan", category: "Ev Tekstili", Icon: BedDouble },
+  { id: "tablecloth", label: "Masa Örtüsü", category: "Ev Tekstili", Icon: Square },
+  { id: "carpet", label: "Halı", category: "Ev Tekstili", Icon: LayoutGrid },
+  { id: "lamp", label: "Abajur / Perde", category: "Özel", Icon: Lamp },
+  { id: "bag", label: "Çanta", category: "Özel", Icon: Briefcase },
+  { id: "leather", label: "Deri Ürün", category: "Özel", Icon: BriefcaseBusiness },
 ];
+
+export const PRODUCT_ICON_CATEGORIES = [
+  "Üst Giyim",
+  "Alt Giyim",
+  "Ev Tekstili",
+  "Özel",
+] as const;
 
 export function getProductIcon(iconName: string): LucideIcon {
   const key = iconName?.toLowerCase().trim() ?? "default";
@@ -86,4 +90,8 @@ export function getProductIcon(iconName: string): LucideIcon {
 export function getProductIconLabel(iconName: string): string {
   const opt = PRODUCT_ICON_OPTIONS.find((o) => o.id === iconName);
   return opt?.label ?? (iconName || "Genel");
+}
+
+export function getProductIconOption(iconName: string): ProductIconOption | undefined {
+  return PRODUCT_ICON_OPTIONS.find((o) => o.id === iconName);
 }
