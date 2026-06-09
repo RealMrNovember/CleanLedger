@@ -11,6 +11,8 @@ import {
   loginRemote,
   fetchProfileRemote,
 } from "@/lib/auth-api";
+import { ensureLicense, isLicenseUsable } from "@/lib/license-client";
+import { getInstallationId } from "@/lib/installation";
 import {
   initDatabase,
   saveOrganizationSettings,
@@ -71,6 +73,16 @@ async function syncOrganization(
   return saveOrganizationSettings(input);
 }
 
+async function verifyLicense(): Promise<void> {
+  const hwid = getInstallationId();
+  const license = await ensureLicense(hwid);
+  if (!isLicenseUsable(license)) {
+    throw new Error(
+      "Lisansınız aktif değil veya süresi dolmuş. Lütfen Cicibyte ile iletişime geçin."
+    );
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [organization, setOrganization] = useState<OrganizationSettings | null>(
@@ -87,6 +99,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (saved && org?.authToken) {
           setSession(saved);
           setOrganization(org);
+          try {
+            await verifyLicense();
+          } catch {
+            /* offline grace: keep session if license check fails */
+          }
         } else if (saved) {
           const synced = await syncOrganization(saved);
           setSession(saved);
@@ -100,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const next = await loginRemote(email, password);
+    await verifyLicense();
     persistSession(next);
     const org = await syncOrganization(next);
     setSession(next);

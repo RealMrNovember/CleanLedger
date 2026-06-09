@@ -43,6 +43,10 @@ jobs:
 
       - name: Build Tauri application
         working-directory: apps/desktop
+        env:
+          VITE_LICENSE_API_URL: https://license.cicibyte.com
+          VITE_LICENSE_APP_CODE: cleanledger
+          VITE_LICENSE_API_KEY: Cicibyte_X92kLpQ84mNz_2026!
         run: npm run tauri build
 
       - name: Upload build artifacts
