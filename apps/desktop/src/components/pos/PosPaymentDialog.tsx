@@ -157,7 +157,7 @@ export function PosPaymentDialog({
             onClick={handleConfirm}
           >
             <Printer className="size-5" />
-            {saving ? "Kaydediliyor..." : "Öde & Kaydet"}
+            {saving ? "Kaydediliyor..." : "Ödeme Ekle & Kaydet"}
           </Button>
         </div>
       </DialogContent>

@@ -23,6 +23,7 @@ import {
   SERVICE_PRICE_MODIFIERS,
   SERVICE_TYPES,
   DEFAULT_CUSTOMER_TAGS,
+  derivePaymentStatus,
 } from "./schema";
 import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
@@ -252,13 +253,6 @@ export function mapOrder(row: Record<string, unknown>): Order {
           : "preparing";
   }
 
-  let paymentStatus = String(
-    row.payment_status ?? row.paymentStatus ?? "unpaid"
-  ) as PaymentStatus;
-  if (paymentStatus !== "paid" && paymentStatus !== "unpaid") {
-    paymentStatus = "unpaid";
-  }
-
   const deliveryRaw = row.delivery_date ?? row.deliveryDate;
   const deliveryDate = deliveryRaw
     ? String(deliveryRaw).slice(0, 10)
@@ -288,6 +282,16 @@ export function mapOrder(row: Record<string, unknown>): Order {
   ) as PaymentMethod;
   if (paymentMethod !== "cash" && paymentMethod !== "card") {
     paymentMethod = "cash";
+  }
+
+  let paymentStatus = String(
+    row.payment_status ?? row.paymentStatus ?? "unpaid"
+  ) as PaymentStatus;
+  if (!["paid", "partial", "unpaid"].includes(paymentStatus)) {
+    paymentStatus = derivePaymentStatus(amountPaid, totalAmount);
+  }
+  if (paymentStatus === "unpaid" && amountPaid > 0 && balanceDue > 0) {
+    paymentStatus = "partial";
   }
 
   return {
@@ -1131,8 +1135,7 @@ export async function createOrder(
     totalAmount
   );
   const balanceDue = Math.max(0, totalAmount - amountPaid);
-  const paymentStatus: PaymentStatus =
-    balanceDue <= 0 ? "paid" : "unpaid";
+  const paymentStatus = derivePaymentStatus(amountPaid, totalAmount);
   const createdAt = new Date().toISOString();
   const orderStatus = input.orderStatus ?? "preparing";
   const priority = input.priority ?? "normal";
@@ -1434,8 +1437,8 @@ export async function getOrderDashboardStats(): Promise<OrderDashboardStats> {
       active.some((o) => o.id === i.orderId)
     ).length,
     pendingCollection: active
-      .filter((o) => o.paymentStatus === "unpaid")
-      .reduce((s, o) => s + o.totalAmount, 0),
+      .filter((o) => o.balanceDue > 0)
+      .reduce((s, o) => s + o.balanceDue, 0),
   };
 }
 
@@ -1477,7 +1480,7 @@ export async function addOrderPayment(
 
   const amountPaid = order.amountPaid + payAmount;
   const balanceDue = Math.max(0, order.totalAmount - amountPaid);
-  const paymentStatus: PaymentStatus = balanceDue <= 0 ? "paid" : "unpaid";
+  const paymentStatus = derivePaymentStatus(amountPaid, order.totalAmount);
 
   await syncOrderPaymentTotals(orderId, {
     amountPaid,
@@ -1518,7 +1521,7 @@ export async function refundOrderPayment(paymentId: number): Promise<void> {
 
   const amountPaid = Math.max(0, order.amountPaid - payment.amount);
   const balanceDue = Math.max(0, order.totalAmount - amountPaid);
-  const paymentStatus: PaymentStatus = balanceDue <= 0 ? "paid" : "unpaid";
+  const paymentStatus = derivePaymentStatus(amountPaid, order.totalAmount);
 
   await syncOrderPaymentTotals(payment.orderId, {
     amountPaid,
