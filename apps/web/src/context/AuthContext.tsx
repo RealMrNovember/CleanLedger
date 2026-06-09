@@ -13,6 +13,7 @@ import {
   signup as apiSignup,
   login as apiLogin,
 } from "@/lib/auth-api";
+import { ensureLicense, getInstallationId } from "@/lib/license-client";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -36,11 +37,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = useCallback(async (input: SignupInput) => {
     const s = await apiSignup(input);
+    try {
+      await ensureLicense(getInstallationId());
+    } catch {
+      /* trial may already exist — signup still succeeds */
+    }
     setSession(s);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const s = await apiLogin(email, password);
+    try {
+      await ensureLicense(getInstallationId());
+    } catch {
+      /* keep login if license server unreachable */
+    }
     setSession(s);
   }, []);
 
