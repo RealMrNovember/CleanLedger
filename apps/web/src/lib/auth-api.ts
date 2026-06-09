@@ -202,5 +202,76 @@ export async function fetchProfile(token: string): Promise<AuthUser> {
   }
 }
 
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+async function changePasswordLocal(
+  email: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<AuthSession> {
+  const users = getLocalUsers();
+  const found = users.find(
+    (u) => u.email.toLowerCase() === email.trim().toLowerCase()
+  );
+  if (!found) {
+    throw new Error("Hesap bulunamadı. Sunucu üzerinden kayıt olduysanız tekrar deneyin.");
+  }
+  if (found.password !== currentPassword) {
+    throw new Error("Mevcut şifre hatalı.");
+  }
+  found.password = newPassword;
+  found.token = makeToken();
+  saveLocalUsers(users);
+  const session = { token: found.token, user: stripPassword(found) };
+  saveSession(session);
+  return session;
+}
+
+export async function changePassword(
+  token: string,
+  email: string,
+  input: ChangePasswordInput
+): Promise<AuthSession> {
+  const currentPassword = input.currentPassword;
+  const newPassword = input.newPassword;
+
+  if (!currentPassword || !newPassword) {
+    throw new Error("Mevcut ve yeni şifre gerekli.");
+  }
+  if (newPassword.length < 6) {
+    throw new Error("Yeni şifre en az 6 karakter olmalı.");
+  }
+  if (currentPassword === newPassword) {
+    throw new Error("Yeni şifre mevcut şifreden farklı olmalı.");
+  }
+
+  try {
+    const res = await apiRequest<{
+      success: boolean;
+      token: string;
+      user: AuthUser;
+    }>("change_password", "POST", {
+      token,
+      currentPassword,
+      newPassword,
+    });
+    const session = { token: res.token, user: res.user };
+    saveSession(session);
+    return session;
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message !== "İstek başarısız." &&
+      err.message !== "Geçersiz işlem."
+    ) {
+      throw err;
+    }
+    return changePasswordLocal(email, currentPassword, newPassword);
+  }
+}
+
 /** Masaüstü uygulaması için export */
 export const AUTH_API_URL = API_BASE;

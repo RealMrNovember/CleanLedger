@@ -1,13 +1,23 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Sparkles, Calendar } from "lucide-react";
+import { LogOut, Sparkles, Calendar, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { DownloadButton } from "@/components/DownloadButton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function AccountPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, changePassword } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
 
   if (!user) return null;
 
@@ -18,17 +28,54 @@ export function AccountPage() {
     navigate("/", { replace: true });
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError("");
+    setPasswordSuccess("");
+
+    if (!currentPassword.trim()) {
+      setPasswordError("Mevcut şifrenizi girin.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError("Yeni şifre en az 6 karakter olmalı.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("Yeni şifreler eşleşmiyor.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await changePassword({
+        currentPassword,
+        newPassword,
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPasswordSuccess("Şifreniz güncellendi.");
+    } catch (err) {
+      setPasswordError(
+        err instanceof Error ? err.message : "Şifre güncellenemedi."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="h-full overflow-y-auto p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-white p-4 text-gray-900 dark:bg-slate-900 dark:text-gray-100 md:p-6">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Hesabım</h1>
           <p className="text-sm text-muted-foreground">
-            Lisans bilgileri ve masaüstü uygulaması indirme
+            Profil, güvenlik ve masaüstü uygulaması
           </p>
         </div>
 
-        <Card>
+        <Card className="bg-white dark:bg-slate-900">
           <CardHeader className="text-center">
             <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-mint to-trust text-white">
               <Sparkles className="size-7" />
@@ -45,8 +92,10 @@ export function AccountPage() {
               <Info label="E-posta" value={user.email} />
               <Info label="Telefon" value={user.phone || "—"} />
               <Info label="Şehir" value={user.city || "—"} />
-              <div className="rounded-xl bg-mint-light/50 p-4">
-                <p className="text-xs font-medium text-[#0f5f57]">Deneme Süresi</p>
+              <div className="rounded-xl bg-mint-light/50 p-4 dark:bg-teal-950/40">
+                <p className="text-xs font-medium text-[#0f5f57] dark:text-teal-200">
+                  Deneme Süresi
+                </p>
                 <p className="mt-1 flex items-center gap-2 font-semibold">
                   <Calendar className="size-4 text-mint" />
                   {trialEnd} tarihine kadar
@@ -72,6 +121,63 @@ export function AccountPage() {
             </Button>
           </CardContent>
         </Card>
+
+        <Card className="bg-white dark:bg-slate-900">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
+              <KeyRound className="size-5 text-trust" />
+              Şifre Yönetimi
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Hesabınızın şifresini buradan güncelleyebilirsiniz. Masaüstü
+              uygulamasında da aynı şifre geçerlidir.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={(e) => void handleChangePassword(e)} className="space-y-4">
+              <PasswordField
+                label="Mevcut Şifre"
+                value={currentPassword}
+                onChange={setCurrentPassword}
+                show={showCurrent}
+                onToggle={() => setShowCurrent((v) => !v)}
+                autoComplete="current-password"
+              />
+              <PasswordField
+                label="Yeni Şifre"
+                value={newPassword}
+                onChange={setNewPassword}
+                show={showNew}
+                onToggle={() => setShowNew((v) => !v)}
+                autoComplete="new-password"
+                hint="En az 6 karakter"
+              />
+              <div>
+                <label className="mb-1 block text-sm font-medium">
+                  Yeni Şifre (Tekrar)
+                </label>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder="Yeni şifreyi tekrar girin"
+                />
+              </div>
+
+              {passwordError && (
+                <p className="text-sm text-destructive">{passwordError}</p>
+              )}
+              {passwordSuccess && (
+                <p className="text-sm font-medium text-mint">{passwordSuccess}</p>
+              )}
+
+              <Button type="submit" disabled={saving}>
+                {saving ? "Kaydediliyor..." : "Şifreyi Güncelle"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
@@ -79,9 +185,51 @@ export function AccountPage() {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl bg-muted/40 p-4">
+    <div className="rounded-xl bg-muted/40 p-4 dark:bg-slate-800/50">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <p className="mt-1 font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  show,
+  onToggle,
+  autoComplete,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  show: boolean;
+  onToggle: () => void;
+  autoComplete: string;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-sm font-medium">{label}</label>
+      <div className="relative">
+        <Input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          className="pr-10"
+        />
+        <button
+          type="button"
+          onClick={onToggle}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
+          aria-label={show ? "Şifreyi gizle" : "Şifreyi göster"}
+        >
+          {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
+      </div>
+      {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
     </div>
   );
 }

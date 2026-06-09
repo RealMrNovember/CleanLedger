@@ -162,4 +162,49 @@ if ($action === 'profile') {
     respond(401, ['success' => false, 'message' => 'Geçersiz oturum.']);
 }
 
+if ($action === 'change_password') {
+    $token = trim($body['token'] ?? $_GET['token'] ?? '');
+    $currentPassword = $body['currentPassword'] ?? '';
+    $newPassword = $body['newPassword'] ?? '';
+
+    if ($token === '') {
+        respond(401, ['success' => false, 'message' => 'Oturum gerekli.']);
+    }
+    if ($currentPassword === '' || $newPassword === '') {
+        respond(422, ['success' => false, 'message' => 'Mevcut ve yeni şifre gerekli.']);
+    }
+    if (strlen($newPassword) < 6) {
+        respond(422, ['success' => false, 'message' => 'Yeni şifre en az 6 karakter olmalı.']);
+    }
+    if ($currentPassword === $newPassword) {
+        respond(422, ['success' => false, 'message' => 'Yeni şifre mevcut şifreden farklı olmalı.']);
+    }
+
+    foreach ($users as &$u) {
+        if (($u['token'] ?? '') === $token) {
+            if (!password_verify($currentPassword, $u['passwordHash'])) {
+                respond(401, ['success' => false, 'message' => 'Mevcut şifre hatalı.']);
+            }
+            $u['passwordHash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+            $u['token'] = generateToken();
+            writeUsers($usersFile, $users);
+            respond(200, [
+                'success' => true,
+                'token' => $u['token'],
+                'user' => [
+                    'email' => $u['email'],
+                    'companyName' => $u['companyName'],
+                    'ownerName' => $u['ownerName'],
+                    'phone' => $u['phone'],
+                    'city' => $u['city'],
+                    'trialEndsAt' => $u['trialEndsAt'],
+                ],
+            ]);
+        }
+    }
+    unset($u);
+
+    respond(401, ['success' => false, 'message' => 'Geçersiz oturum.']);
+}
+
 respond(404, ['success' => false, 'message' => 'Geçersiz işlem.']);
