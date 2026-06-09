@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Product, Order, ServiceType, PaymentMethod, OrderPriority } from "@/db/schema";
+import type {
+  Product,
+  Order,
+  ServiceType,
+  PaymentMethod,
+  OrderPriority,
+  Customer,
+} from "@/db/schema";
 import { SERVICE_LABELS } from "@/db/schema";
 import {
   createOrder,
@@ -14,8 +21,10 @@ import { useCatalog } from "@/hooks/useCatalog";
 import { useAuth } from "@/context/AuthContext";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
 import { CustomerPanel } from "@/components/pos/CustomerPanel";
+import { CustomerPickerDialog } from "@/components/pos/CustomerPickerDialog";
 import { ProductCatalog } from "@/components/pos/ProductCatalog";
 import { CartPanel, type CartLine } from "@/components/pos/CartPanel";
+import { PosPaymentDialog } from "@/components/pos/PosPaymentDialog";
 import { OrderSuccessDialog } from "@/components/pos/OrderSuccessDialog";
 import { PosHeader } from "@/components/pos/PosHeader";
 import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
@@ -38,8 +47,6 @@ export function PosScreen() {
   );
   const [priority, setPriority] = useState<OrderPriority>("normal");
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [amountPaid, setAmountPaid] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [couponCode, setCouponCode] = useState("");
   const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -48,6 +55,8 @@ export function PosScreen() {
   const [savedOrder, setSavedOrder] = useState<Order | null>(null);
   const [savedReceipt, setSavedReceipt] = useState<ReceiptData | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(async () => {
@@ -84,19 +93,6 @@ export function PosScreen() {
     () => Math.max(0, subtotal - discountAmount),
     [subtotal, discountAmount]
   );
-
-  const balanceDue = useMemo(
-    () => Math.max(0, total - Math.min(amountPaid, total)),
-    [total, amountPaid]
-  );
-
-  useEffect(() => {
-    if (cart.length === 0) {
-      setAmountPaid(0);
-      return;
-    }
-    setAmountPaid((prev) => (prev === 0 || prev > total ? total : prev));
-  }, [total, cart.length]);
 
   useEffect(() => {
     if (!appliedCouponCode) return;
@@ -153,87 +149,100 @@ export function PosScreen() {
     );
   }, [couponCode, subtotal]);
 
-  const handleSave = useCallback(async () => {
-    if (cart.length === 0) return;
-    const trimmedPhone = phone.trim();
-    if (!trimmedPhone) {
-      alert("Lütfen müşteri telefon numarasını girin.");
-      return;
-    }
-    if (!firstName.trim()) {
-      alert("Lütfen müşteri adını girin.");
-      return;
-    }
+  const handlePickCustomer = useCallback(async (customer: Customer) => {
+    setPhone(customer.phone);
+    setFirstName(customer.name);
+    setLastName(customer.lastName ?? "");
+    setIsRegistered(true);
+    const debt = await getCustomerCreditDebt(customer.phone);
+    setCreditDebt(debt);
+  }, []);
 
-    setSaving(true);
-    try {
-      const customer = await upsertCustomerByPhone(
-        trimmedPhone,
-        firstName.trim(),
-        lastName.trim()
-      );
-      const fullName = customer
-        ? formatCustomerName(customer)
-        : [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
-      const paid = Math.min(Math.max(0, amountPaid), total);
-      const { order } = await createOrder({
-        customerPhone: trimmedPhone,
-        customerId: customer?.id ?? null,
-        amountPaid: paid,
-        paymentMethod,
-        couponCode: appliedCouponCode,
-        discountAmount,
-        deliveryDate,
-        priority,
-        items: cart.map((line) => ({
-          productId: line.product.id,
-          serviceType: line.serviceType,
-          subtotal: line.subtotal,
-        })),
-      });
-      setSavedOrder(order);
-      setSavedReceipt({
-        order,
-        companyName: user?.companyName ?? "CleanLedger",
-        customerPhone: trimmedPhone,
-        customerName: fullName,
-        lines: cart.map((line) => ({
-          productName: line.product.name,
-          serviceLabel: SERVICE_LABELS[line.serviceType],
-          unitPrice: line.subtotal,
-        })),
-        discountAmount,
-        amountPaid: paid,
-        balanceDue: order.balanceDue,
-        shopContact: {
+  const handleSave = useCallback(
+    async (amountPaid: number, paymentMethod: PaymentMethod) => {
+      if (cart.length === 0) return;
+      const trimmedPhone = phone.trim();
+      if (!trimmedPhone) {
+        alert("Lütfen müşteri telefon numarasını girin.");
+        return;
+      }
+      if (!firstName.trim()) {
+        alert("Lütfen müşteri adını girin.");
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const customer = await upsertCustomerByPhone(
+          trimmedPhone,
+          firstName.trim(),
+          lastName.trim()
+        );
+        const fullName = customer
+          ? formatCustomerName(customer)
+          : [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
+        const paid = Math.min(Math.max(0, amountPaid), total);
+        const { order } = await createOrder({
+          customerPhone: trimmedPhone,
+          customerId: customer?.id ?? null,
+          amountPaid: paid,
+          paymentMethod,
+          couponCode: appliedCouponCode,
+          discountAmount,
+          deliveryDate,
+          priority,
+          items: cart.map((line) => ({
+            productId: line.product.id,
+            serviceType: line.serviceType,
+            subtotal: line.subtotal,
+          })),
+        });
+        setSavedOrder(order);
+        setSavedReceipt({
+          order,
           companyName: user?.companyName ?? "CleanLedger",
-          phone: user?.phone,
-          email: user?.email,
-        },
-      });
-      setShowSuccess(true);
-      await refresh();
-    } catch (err) {
-      console.error(err);
-      alert("Sipariş kaydedilemedi. Lütfen tekrar deneyin.");
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    cart,
-    phone,
-    firstName,
-    lastName,
-    amountPaid,
-    paymentMethod,
-    appliedCouponCode,
-    discountAmount,
-    deliveryDate,
-    priority,
-    total,
-    refresh,
-    user?.companyName,
-  ]);
+          customerPhone: trimmedPhone,
+          customerName: fullName,
+          lines: cart.map((line) => ({
+            productName: line.product.name,
+            serviceLabel: SERVICE_LABELS[line.serviceType],
+            unitPrice: line.subtotal,
+          })),
+          discountAmount,
+          amountPaid: paid,
+          balanceDue: order.balanceDue,
+          shopContact: {
+            companyName: user?.companyName ?? "CleanLedger",
+            phone: user?.phone,
+            email: user?.email,
+          },
+        });
+        setPaymentDialogOpen(false);
+        setShowSuccess(true);
+        await refresh();
+      } catch (err) {
+        console.error(err);
+        alert("Sipariş kaydedilemedi. Lütfen tekrar deneyin.");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [
+      cart,
+      phone,
+      firstName,
+      lastName,
+      appliedCouponCode,
+      discountAmount,
+      deliveryDate,
+      priority,
+      total,
+      refresh,
+      user?.companyName,
+      user?.phone,
+      user?.email,
+    ]
+  );
 
   const handleNewOrder = useCallback(() => {
     setCart([]);
@@ -244,8 +253,6 @@ export function PosScreen() {
     setCreditDebt(0);
     setDeliveryDate(toDateKey(addDaysToDate(new Date(), 3)));
     setPriority("normal");
-    setAmountPaid(0);
-    setPaymentMethod("cash");
     setCouponCode("");
     setAppliedCouponCode(null);
     setDiscountAmount(0);
@@ -268,10 +275,27 @@ export function PosScreen() {
 
   return (
     <div className="flex h-full flex-col">
-      <PosHeader orderCount={cart.length} total={total} />
+      <CustomerPickerDialog
+        open={customerPickerOpen}
+        onOpenChange={setCustomerPickerOpen}
+        onSelect={(c) => void handlePickCustomer(c)}
+      />
+      <PosPaymentDialog
+        open={paymentDialogOpen}
+        onOpenChange={setPaymentDialogOpen}
+        total={total}
+        subtotal={subtotal}
+        discountAmount={discountAmount}
+        saving={saving}
+        onConfirm={({ amountPaid, paymentMethod }) =>
+          void handleSave(amountPaid, paymentMethod)
+        }
+      />
 
-      <div className="flex flex-1 flex-col gap-4 overflow-hidden p-3 sm:p-4 xl:grid xl:grid-cols-[minmax(240px,280px)_1fr_minmax(280px,340px)] xl:gap-4">
-        <section className="max-h-[42vh] min-h-0 shrink-0 overflow-y-auto xl:max-h-none xl:shrink">
+      <PosHeader orderCount={cart.length} />
+
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4 lg:grid lg:grid-cols-[minmax(240px,280px)_1fr_minmax(280px,340px)]">
+        <section className="w-full shrink-0 lg:min-h-0 lg:overflow-y-auto">
           <CustomerPanel
             phone={phone}
             firstName={firstName}
@@ -281,6 +305,7 @@ export function PosScreen() {
             onPhoneChange={setPhone}
             onFirstNameChange={setFirstName}
             onLastNameChange={setLastName}
+            onPickCustomer={() => setCustomerPickerOpen(true)}
             deliveryDate={deliveryDate}
             onDeliveryDateChange={setDeliveryDate}
             priority={priority}
@@ -288,29 +313,27 @@ export function PosScreen() {
           />
         </section>
 
-        <section className="min-h-[220px] flex-1 overflow-hidden rounded-2xl border border-border/50 bg-card/50 p-3 sm:min-h-[280px] sm:p-4 xl:min-h-0">
-          <ProductCatalog products={products} onSelectProduct={handleSelectProduct} />
+        <section className="flex min-h-[240px] w-full flex-1 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/50 p-3 sm:min-h-[320px] sm:p-4 lg:min-h-0">
+          <ProductCatalog
+            products={products}
+            onSelectProduct={handleSelectProduct}
+            onProductAdded={refresh}
+          />
         </section>
 
-        <section className="max-h-[38vh] min-h-[200px] shrink-0 overflow-hidden sm:max-h-[42vh] xl:max-h-none xl:min-h-0 xl:shrink">
+        <section className="flex min-h-[280px] w-full shrink-0 flex-col overflow-hidden lg:min-h-0">
           <CartPanel
             items={cart}
             subtotal={subtotal}
             discountAmount={discountAmount}
             total={total}
-            amountPaid={amountPaid}
-            paymentMethod={paymentMethod}
-            balanceDue={balanceDue}
             couponCode={couponCode}
             couponMessage={couponMessage}
-            saving={saving}
             onServiceChange={(key, st) => void handleServiceChange(key, st)}
             onRemove={handleRemove}
-            onAmountPaidChange={setAmountPaid}
-            onPaymentMethodChange={setPaymentMethod}
             onCouponCodeChange={setCouponCode}
             onApplyCoupon={() => void handleApplyCoupon()}
-            onSave={handleSave}
+            onPay={() => setPaymentDialogOpen(true)}
           />
         </section>
       </div>

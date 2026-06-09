@@ -1,6 +1,7 @@
-import { Trash2, Printer, ShoppingBag, Tag } from "lucide-react";
-import type { Product, ServiceType, PaymentMethod } from "@/db/schema";
-import { SERVICE_LABELS, PAYMENT_METHOD_LABELS } from "@/db/schema";
+import { useState } from "react";
+import { Trash2, ShoppingBag, Tag, Plus, Wallet } from "lucide-react";
+import type { Product, ServiceType } from "@/db/schema";
+import { SERVICE_LABELS } from "@/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,19 +27,13 @@ interface CartPanelProps {
   subtotal: number;
   discountAmount: number;
   total: number;
-  amountPaid: number;
-  paymentMethod: PaymentMethod;
-  balanceDue: number;
   couponCode: string;
   couponMessage?: string;
-  saving: boolean;
   onServiceChange: (key: string, serviceType: ServiceType) => void;
   onRemove: (key: string) => void;
-  onAmountPaidChange: (value: number) => void;
-  onPaymentMethodChange: (method: PaymentMethod) => void;
   onCouponCodeChange: (code: string) => void;
   onApplyCoupon: () => void;
-  onSave: () => void;
+  onPay: () => void;
 }
 
 export function CartPanel({
@@ -46,22 +41,18 @@ export function CartPanel({
   subtotal,
   discountAmount,
   total,
-  amountPaid,
-  paymentMethod,
-  balanceDue,
   couponCode,
   couponMessage,
-  saving,
   onServiceChange,
   onRemove,
-  onAmountPaidChange,
-  onPaymentMethodChange,
   onCouponCodeChange,
   onApplyCoupon,
-  onSave,
+  onPay,
 }: CartPanelProps) {
+  const [couponOpen, setCouponOpen] = useState(false);
+
   return (
-    <Card className="flex h-full flex-col border-border/50 bg-card/80 shadow-none">
+    <Card className="flex h-full w-full flex-col border-border/50 bg-card/80 shadow-none">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground/80">
           <ShoppingBag className="size-5 text-trust" />
@@ -74,16 +65,16 @@ export function CartPanel({
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="flex flex-1 flex-col gap-4 overflow-hidden p-5 pt-0">
-        <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+      <CardContent className="flex flex-1 flex-col gap-3 overflow-hidden p-4 pt-0 sm:p-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {items.length === 0 ? (
-            <div className="flex h-full min-h-[200px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 p-6 text-center">
+            <div className="flex h-full min-h-[160px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 p-6 text-center">
               <ShoppingBag className="mb-3 size-10 text-muted-foreground/40" />
               <p className="font-medium text-muted-foreground">
                 Henüz ürün eklenmedi
               </p>
               <p className="mt-1 text-sm text-muted-foreground/70">
-                Ortadaki katalogdan ürün seçin
+                Katalogdan ürün seçin
               </p>
             </div>
           ) : (
@@ -136,94 +127,91 @@ export function CartPanel({
           )}
         </div>
 
-        <div className="mt-auto space-y-4 border-t border-border/60 pt-4">
-          <div className="flex gap-2">
-            <Input
-              value={couponCode}
-              onChange={(e) => onCouponCodeChange(e.target.value.toUpperCase())}
-              placeholder="Kupon kodu"
-              className="h-10"
-            />
-            <Button
+        <div className="mt-auto shrink-0 space-y-3 border-t border-border/60 pt-3">
+          {!couponOpen ? (
+            <button
               type="button"
-              variant="outline"
-              className="shrink-0 gap-1"
-              onClick={onApplyCoupon}
-              disabled={!couponCode.trim()}
+              onClick={() => setCouponOpen(true)}
+              className="flex w-full items-center gap-2 rounded-xl border border-dashed border-border/60 px-3 py-2 text-sm font-medium text-muted-foreground transition hover:border-mint/40 hover:text-foreground"
             >
-              <Tag className="size-4" />
-              Uygula
-            </Button>
-          </div>
-          {couponMessage && (
-            <p className="text-xs font-medium text-mint">{couponMessage}</p>
+              <Plus className="size-4" />
+              Kupon Ekle
+            </button>
+          ) : (
+            <div className="space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1 text-sm font-medium">
+                  <Tag className="size-4" />
+                  Kupon
+                </span>
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setCouponOpen(false)}
+                >
+                  Kapat
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={couponCode}
+                  onChange={(e) =>
+                    onCouponCodeChange(e.target.value.toUpperCase())
+                  }
+                  placeholder="Kupon kodu"
+                  className="h-10"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={onApplyCoupon}
+                  disabled={!couponCode.trim()}
+                >
+                  Uygula
+                </Button>
+              </div>
+              {couponMessage && (
+                <p className="text-xs font-medium text-mint">{couponMessage}</p>
+              )}
+            </div>
           )}
 
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between text-muted-foreground">
-              <span>Ara Toplam</span>
-              <span>{formatCurrency(subtotal)}</span>
+          {(discountAmount > 0 || items.length > 0) && (
+            <div className="space-y-1 text-sm">
+              {discountAmount > 0 && (
+                <>
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Ara Toplam</span>
+                    <span>{formatCurrency(subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-mint">
+                    <span>İndirim</span>
+                    <span>-{formatCurrency(discountAmount)}</span>
+                  </div>
+                </>
+              )}
             </div>
-            {discountAmount > 0 && (
-              <div className="flex justify-between text-mint">
-                <span>İndirim</span>
-                <span>-{formatCurrency(discountAmount)}</span>
-              </div>
-            )}
-            <div className="flex items-end justify-between pt-1">
-              <span className="text-base font-medium">Toplam</span>
-              <span className="text-3xl font-bold tracking-tight">
-                {formatCurrency(total)}
-              </span>
-            </div>
-          </div>
+          )}
 
-          <div className="space-y-2 rounded-xl border border-border/60 bg-muted/30 p-3">
-            <label className="text-sm font-medium">Ödenen Tutar</label>
-            <Input
-              type="number"
-              min={0}
-              max={total}
-              step={1}
-              value={amountPaid || ""}
-              onChange={(e) =>
-                onAmountPaidChange(Math.max(0, Number(e.target.value) || 0))
-              }
-              className="h-11 text-lg font-semibold"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              {(["cash", "card"] as PaymentMethod[]).map((method) => (
-                <button
-                  key={method}
-                  type="button"
-                  onClick={() => onPaymentMethodChange(method)}
-                  className={cn(
-                    "rounded-xl py-2.5 text-sm font-semibold transition",
-                    paymentMethod === method
-                      ? "bg-trust text-white"
-                      : "bg-background text-muted-foreground hover:bg-muted"
-                  )}
-                >
-                  {PAYMENT_METHOD_LABELS[method]}
-                </button>
-              ))}
-            </div>
-            {balanceDue > 0 && (
-              <p className="text-center text-sm font-semibold text-[#b45309]">
-                Cariye aktarılacak: {formatCurrency(balanceDue)}
-              </p>
-            )}
+          <div className="rounded-2xl bg-trust-light/60 px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-trust">
+              Toplam Tutar
+            </p>
+            <p className="text-3xl font-bold tracking-tight text-foreground">
+              {formatCurrency(total)}
+            </p>
           </div>
 
           <Button
             variant="accent"
             size="xl"
             className="w-full gap-3 text-lg"
-            disabled={items.length === 0 || saving}
-            onClick={onSave}
+            disabled={items.length === 0}
+            onClick={onPay}
           >
-            <Printer className="size-6" />
-            {saving ? "Kaydediliyor..." : "Kaydet & Yazdır"}
+            <Wallet className="size-6" />
+            Öde
           </Button>
         </div>
       </CardContent>

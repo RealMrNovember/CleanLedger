@@ -1,14 +1,20 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutGrid,
-  Users,
   Settings,
   ShoppingCart,
   ClipboardList,
   LogOut,
   UserCircle,
+  Users,
+  Menu,
+  X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { SidebarNav } from "@/components/layout/SidebarNav";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -28,9 +34,56 @@ function formatWelcome(ownerName: string, companyName: string): string {
   return `Hoş Geldiniz, ${titled} — ${companyName}`;
 }
 
+function SidebarContent({
+  collapsed,
+  onNavigate,
+  onLogout,
+}: {
+  collapsed: boolean;
+  onNavigate?: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <>
+      <div
+        className={cn(
+          "flex items-center border-b border-border/60",
+          collapsed ? "justify-center p-3" : "p-4"
+        )}
+      >
+        <Logo size={collapsed ? "sm" : "md"} />
+      </div>
+      <SidebarNav items={navItems} collapsed={collapsed} onNavigate={onNavigate} />
+      <div className="space-y-2 border-t border-border/60 p-2">
+        {!collapsed && (
+          <div className="flex items-center gap-2 rounded-xl bg-trust-light/50 px-3 py-2 text-xs text-trust">
+            <LayoutGrid className="size-4 shrink-0" />
+            <span>Web POS — tarayıcıda</span>
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "text-muted-foreground",
+            collapsed ? "w-full justify-center px-2" : "w-full justify-start gap-2"
+          )}
+          onClick={onLogout}
+          title="Çıkış Yap"
+        >
+          <LogOut className="size-4" />
+          {!collapsed && "Çıkış Yap"}
+        </Button>
+      </div>
+    </>
+  );
+}
+
 export function WebAppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -40,78 +93,80 @@ export function WebAppLayout() {
   return (
     <div className="flex h-[100dvh] flex-col bg-background md:flex-row">
       {/* Desktop sidebar */}
-      <aside className="hidden w-56 shrink-0 flex-col border-r border-border/60 bg-card/90 md:flex">
-        <div className="border-b border-border/60 p-4">
-          <Logo size="md" />
-        </div>
-        <nav className="flex-1 space-y-1 p-3">
-          {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-mint-light text-[#0f3d3a] shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )
-              }
-            >
-              <Icon className="size-5 shrink-0" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="space-y-2 border-t border-border/60 p-4">
-          <div className="flex items-center gap-2 rounded-xl bg-trust-light/50 px-3 py-2 text-xs text-trust">
-            <LayoutGrid className="size-4" />
-            <span>Web POS — tarayıcıda</span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2 text-muted-foreground"
-            onClick={handleLogout}
-          >
-            <LogOut className="size-4" />
-            Çıkış Yap
-          </Button>
-        </div>
+      <aside
+        className={cn(
+          "hidden shrink-0 flex-col border-r border-border/60 bg-card/90 transition-[width] duration-200 md:flex",
+          collapsed ? "w-[4.5rem]" : "w-56"
+        )}
+      >
+        <SidebarContent collapsed={collapsed} onLogout={handleLogout} />
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center justify-center gap-2 border-t border-border/60 py-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          title={collapsed ? "Menüyü genişlet" : "Menüyü daralt"}
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-4" />
+          ) : (
+            <>
+              <PanelLeftClose className="size-4" />
+              <span>Daralt</span>
+            </>
+          )}
+        </button>
       </aside>
 
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="Menüyü kapat"
+            onClick={() => setMobileOpen(false)}
+          />
+          <aside className="relative flex h-full w-72 max-w-[85vw] flex-col bg-card shadow-xl">
+            <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+              <Logo size="sm" />
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <SidebarContent
+              collapsed={false}
+              onNavigate={() => setMobileOpen(false)}
+              onLogout={handleLogout}
+            />
+          </aside>
+        </div>
+      )}
+
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {user?.companyName && user?.ownerName && (
-          <div className="border-b border-border/60 bg-card/60 px-4 py-2.5 backdrop-blur-sm md:px-6">
-            <p className="truncate text-sm font-medium text-foreground/90">
+        <div className="flex items-center gap-3 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-sm md:px-6">
+          <button
+            type="button"
+            className="inline-flex size-10 items-center justify-center rounded-xl border border-border/60 md:hidden"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Menüyü aç"
+          >
+            <Menu className="size-5" />
+          </button>
+          {user?.companyName && user?.ownerName && (
+            <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
               {formatWelcome(user.ownerName, user.companyName)}
             </p>
-          </div>
-        )}
+          )}
+        </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden pb-16 md:pb-0">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <Outlet />
         </div>
       </div>
-
-      {/* Mobile bottom navigation */}
-      <nav className="fixed inset-x-0 bottom-0 z-50 flex border-t border-border/60 bg-card/95 backdrop-blur-md md:hidden">
-        {navItems.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              cn(
-                "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium",
-                isActive ? "text-[#0f3d3a]" : "text-muted-foreground"
-              )
-            }
-          >
-            <Icon className="size-5" />
-            <span className="max-w-[4.5rem] truncate">{label.split(" ")[0]}</span>
-          </NavLink>
-        ))}
-      </nav>
     </div>
   );
 }
