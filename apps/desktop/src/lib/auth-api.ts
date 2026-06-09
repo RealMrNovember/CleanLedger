@@ -21,7 +21,9 @@ export interface SignupInput {
   password: string;
 }
 
-const AUTH_API_URL = "https://cleanledger.cicibyte.com/api/auth.php";
+import { appConfig } from "@/lib/config";
+
+const AUTH_API_URL = appConfig.authApiUrl;
 const LOCAL_USERS_KEY = "cleanledger_desktop_users";
 
 type StoredUser = AuthUser & { password: string; token: string };
@@ -103,8 +105,16 @@ export async function loginRemote(
       token: string;
       user: AuthUser;
     }>("login", { email, password });
+    if (!res.token?.trim()) {
+      throw new Error("Sunucu geçerli oturum anahtarı döndürmedi.");
+    }
     return { token: res.token, user: res.user };
-  } catch {
+  } catch (err) {
+    if (import.meta.env.PROD) {
+      throw err instanceof Error
+        ? err
+        : new Error("Giriş başarısız. İnternet bağlantınızı kontrol edin.");
+    }
     return loginLocal(email, password);
   }
 }

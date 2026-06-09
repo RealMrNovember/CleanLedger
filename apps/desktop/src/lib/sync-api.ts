@@ -4,11 +4,9 @@ export interface DatabaseSnapshotPayload {
   data: Record<string, unknown>;
 }
 
-const SYNC_API_URL =
-  import.meta.env.VITE_SYNC_API_URL ??
-  (import.meta.env.PROD
-    ? "https://cleanledger.cicibyte.com/api/sync.php"
-    : "/api/sync.php");
+import { appConfig } from "@/lib/config";
+
+const SYNC_API_URL = appConfig.syncApiUrl;
 
 function readToken(): string | null {
   for (const key of ["cleanledger_session", "cleanledger_desktop_session"]) {

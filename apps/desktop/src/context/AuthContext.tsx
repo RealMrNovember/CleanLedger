@@ -17,7 +17,6 @@ import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service"
 import {
   initDatabase,
   saveOrganizationSettings,
-  getOrganizationSettings,
   clearOrganizationSettings,
   type OrganizationInput,
 } from "@/db/client";
@@ -43,11 +42,25 @@ function persistSession(session: AuthSession | null): void {
   }
 }
 
+function isValidSession(session: AuthSession | null): session is AuthSession {
+  return Boolean(
+    session?.token?.trim() &&
+      session.user?.email?.trim() &&
+      session.user?.companyName?.trim()
+  );
+}
+
+async function clearAuthState(): Promise<void> {
+  persistSession(null);
+  await clearOrganizationSettings();
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   organization: OrganizationSettings | null;
   loading: boolean;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -84,6 +97,29 @@ async function verifyLicense(): Promise<void> {
   }
 }
 
+async function restoreSession(
+  saved: AuthSession
+): Promise<AuthSession | null> {
+  if (!isValidSession(saved)) {
+    await clearAuthState();
+    return null;
+  }
+
+  if (import.meta.env.PROD) {
+    try {
+      const profile = await fetchProfileRemote(saved.token);
+      const validated: AuthSession = { token: saved.token, user: profile };
+      persistSession(validated);
+      return validated;
+    } catch {
+      await clearAuthState();
+      return null;
+    }
+  }
+
+  return saved;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [organization, setOrganization] = useState<OrganizationSettings | null>(
@@ -96,25 +132,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await initDatabase();
         const saved = loadSession();
-        const org = await getOrganizationSettings();
-        if (saved && org?.authToken) {
-          setSession(saved);
+        const restored = saved ? await restoreSession(saved) : null;
+
+        if (restored) {
+          const org = await syncOrganization(restored);
+          if (!org.authToken?.trim()) {
+            await clearAuthState();
+            return;
+          }
+          setSession(restored);
           setOrganization(org);
           try {
             await verifyLicense();
           } catch {
             /* offline grace: keep session if license check fails */
           }
-        } else if (saved) {
-          const synced = await syncOrganization(saved);
-          setSession(saved);
-          setOrganization(synced);
-        }
-        if (saved?.token) {
           await runSyncPull();
           initSyncListeners(() => {
             window.dispatchEvent(new Event("cleanledger-sync"));
           });
+        } else if (saved) {
+          await clearAuthState();
         }
       } finally {
         setLoading(false);
@@ -124,6 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const next = await loginRemote(email, password);
+    if (!isValidSession(next)) {
+      throw new Error("Geçersiz oturum yanıtı alındı.");
+    }
     await verifyLicense();
     persistSession(next);
     const org = await syncOrganization(next);
@@ -134,19 +175,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    persistSession(null);
-    await clearOrganizationSettings();
+    await clearAuthState();
     setSession(null);
     setOrganization(null);
   }, []);
 
+  const token = session?.token?.trim() ?? null;
+
   return (
     <AuthContext.Provider
       value={{
-        user: session?.user ?? null,
-        token: session?.token ?? null,
+        user: token ? (session?.user ?? null) : null,
+        token,
         organization,
         loading,
+        isAuthenticated: Boolean(token && session?.user),
         login,
         logout,
       }}

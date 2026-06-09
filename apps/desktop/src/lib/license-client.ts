@@ -1,9 +1,8 @@
-const BASE_URL = (
-  import.meta.env.VITE_LICENSE_API_URL ?? "https://license.cicibyte.com"
-).replace(/\/$/, "");
+import { appConfig } from "@/lib/config";
 
-const APP_CODE = import.meta.env.VITE_LICENSE_APP_CODE ?? "cleanledger";
-const API_KEY = import.meta.env.VITE_LICENSE_API_KEY ?? "";
+const BASE_URL = appConfig.licenseApiUrl;
+const APP_CODE = appConfig.licenseAppCode;
+const API_KEY = appConfig.licenseApiKey;
 
 export interface LicenseSnapshot {
   status: string;
