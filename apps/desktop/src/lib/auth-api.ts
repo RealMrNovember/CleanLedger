@@ -55,16 +55,43 @@ async function apiRequest<T>(
     ? `${AUTH_API_URL}?action=${action}&token=${encodeURIComponent(token)}`
     : `${AUTH_API_URL}?action=${action}`;
 
-  const res = await fetch(url, {
-    method: body ? "POST" : "GET",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  const data = (await res.json()) as T & { message?: string };
-  if (!res.ok) {
-    throw new Error((data as { message?: string }).message ?? "İstek başarısız.");
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: body ? "POST" : "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    const detail =
+      err instanceof Error ? err.message : "Ağ bağlantısı kurulamadı.";
+    throw new Error(`Auth API'ye ulaşılamadı: ${detail}`);
   }
+
+  const raw = await res.text();
+  let data: (T & { message?: string; code?: string }) | null = null;
+  try {
+    data = raw ? (JSON.parse(raw) as T & { message?: string; code?: string }) : null;
+  } catch {
+    throw new Error(
+      `Auth API geçersiz yanıt döndü (HTTP ${res.status}). Sunucu JSON yerine HTML döndürmüş olabilir.`
+    );
+  }
+
+  if (!res.ok) {
+    const code = data?.code ? ` [${data.code}]` : "";
+    throw new Error(
+      (data?.message ?? "İstek başarısız.") + code
+    );
+  }
+
+  if (!data) {
+    throw new Error("Auth API boş yanıt döndü.");
+  }
+
   return data;
 }
 

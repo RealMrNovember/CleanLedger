@@ -26,8 +26,8 @@ import { ProductCatalog } from "@/components/pos/ProductCatalog";
 import { CartPanel, type CartLine } from "@/components/pos/CartPanel";
 import { PosPaymentDialog } from "@/components/pos/PosPaymentDialog";
 import { PosStickyBar } from "@/components/pos/PosStickyBar";
+import { PosResizableLayout } from "@/components/pos/PosResizableLayout";
 import { OrderSuccessDialog } from "@/components/pos/OrderSuccessDialog";
-import { PosHeader } from "@/components/pos/PosHeader";
 import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
 
 let lineCounter = 0;
@@ -287,37 +287,35 @@ export function PosScreen() {
         }
       />
 
-      <PosHeader orderCount={cart.length} />
-
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 pb-24 sm:gap-4 sm:p-4 md:pb-4 lg:flex-row">
-        <section className="w-full shrink-0 lg:w-[240px] lg:overflow-y-auto">
-          <CustomerPanel
-            phone={phone}
-            firstName={firstName}
-            lastName={lastName}
-            isRegistered={isRegistered}
-            creditDebt={creditDebt}
-            onPhoneChange={setPhone}
-            onFirstNameChange={setFirstName}
-            onLastNameChange={setLastName}
-            onPickCustomer={() => setCustomerPickerOpen(true)}
-            deliveryDate={deliveryDate}
-            onDeliveryDateChange={setDeliveryDate}
-            priority={priority}
-            onPriorityChange={setPriority}
-          />
-        </section>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-4">
-          <section className="flex max-h-[38vh] min-h-[180px] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-white p-2 dark:border-slate-700 dark:bg-slate-900 sm:max-h-[42vh] sm:p-3 lg:max-h-none lg:min-h-0 lg:flex-[3]">
-            <ProductCatalog
-              products={products}
-              onSelectProduct={handleSelectProduct}
-              onProductAdded={refresh}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3 pb-24 sm:p-4 md:pb-4">
+        <PosResizableLayout
+          customer={
+            <CustomerPanel
+              phone={phone}
+              firstName={firstName}
+              lastName={lastName}
+              isRegistered={isRegistered}
+              creditDebt={creditDebt}
+              onPhoneChange={setPhone}
+              onFirstNameChange={setFirstName}
+              onLastNameChange={setLastName}
+              onPickCustomer={() => setCustomerPickerOpen(true)}
+              deliveryDate={deliveryDate}
+              onDeliveryDateChange={setDeliveryDate}
+              priority={priority}
+              onPriorityChange={setPriority}
             />
-          </section>
-
-          <section className="flex min-h-[200px] min-w-0 flex-1 flex-col overflow-hidden lg:flex-[7]">
+          }
+          catalog={
+            <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-white p-2 dark:border-slate-700 dark:bg-slate-900 sm:p-3">
+              <ProductCatalog
+                products={products}
+                onSelectProduct={handleSelectProduct}
+                onProductAdded={refresh}
+              />
+            </section>
+          }
+          cart={
             <CartPanel
               items={cart}
               subtotal={subtotal}
@@ -332,8 +330,8 @@ export function PosScreen() {
               onPay={() => setPaymentDialogOpen(true)}
               hideMobileCheckout
             />
-          </section>
-        </div>
+          }
+        />
       </div>
 
       <PosStickyBar

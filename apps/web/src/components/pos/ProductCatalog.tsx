@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import type { Product } from "@/db/schema";
-import { getProductIcon } from "@/lib/product-icons";
+import { ProductVisual } from "@/components/pos/ProductVisual";
 import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,24 +38,25 @@ export function ProductCatalog({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="grid w-full grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-2 md:grid-cols-3 md:gap-3 lg:grid-cols-4">
-            {products.map((product) => {
-              const Icon = getProductIcon(product.iconName);
-              return (
+            {products.map((product) => (
                 <button
                   key={product.id}
                   type="button"
                   onClick={() => onSelectProduct(product)}
                   className={cn(
-                    "group flex min-h-[76px] w-full flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-1.5",
-                    "bg-white shadow-sm transition-all duration-200 dark:bg-slate-800",
-                    "hover:border-mint/40 hover:bg-mint-light/40 dark:hover:bg-slate-700",
+                    "group flex min-h-[84px] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-border/40 p-2",
+                    "bg-gradient-to-b from-white to-slate-50/80 shadow-sm transition-all duration-200 dark:border-slate-700/60 dark:from-slate-800 dark:to-slate-900/80",
+                    "hover:border-mint/50 hover:shadow-md hover:shadow-mint/10",
                     "active:scale-[0.97] active:border-mint",
-                    "sm:min-h-[100px] sm:gap-2 sm:rounded-2xl sm:p-3 md:min-h-[120px] md:p-4"
+                    "sm:min-h-[108px] sm:gap-2 sm:rounded-2xl sm:p-3 md:min-h-[128px] md:p-4",
                   )}
                 >
-                  <div className="flex size-9 items-center justify-center rounded-lg bg-trust-light/80 text-trust transition-colors group-hover:bg-mint/20 group-hover:text-mint sm:size-12 sm:rounded-xl md:size-14">
-                    <Icon className="size-5 stroke-[1.5] sm:size-6 md:size-7" />
-                  </div>
+                  <ProductVisual
+                    name={product.name}
+                    iconName={product.iconName}
+                    size="md"
+                    interactive
+                  />
                   <span className="line-clamp-2 text-center text-[10px] font-semibold leading-tight text-gray-900 dark:text-gray-100 sm:text-xs md:text-sm">
                     {product.name}
                   </span>
@@ -63,8 +64,7 @@ export function ProductCatalog({
                     {formatCurrency(product.basePrice)}
                   </span>
                 </button>
-              );
-            })}
+              ))}
           </div>
           <div className="mt-2 hidden border-t border-border/40 pt-2 md:block">
             <Button

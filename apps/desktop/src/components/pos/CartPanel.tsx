@@ -5,7 +5,7 @@ import { SERVICE_LABELS } from "@/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getProductIcon } from "@/lib/product-icons";
+import { ProductVisual } from "@/components/pos/ProductVisual";
 import { cn, formatCurrency } from "@/lib/utils";
 
 export interface CartLine {
@@ -81,17 +81,17 @@ export function CartPanel({
               </p>
             </div>
           ) : (
-            items.map((line) => {
-              const Icon = getProductIcon(line.product.iconName);
-              return (
+            items.map((line) => (
                 <div
                   key={line.key}
                   className="rounded-xl border border-border/60 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-800/60 sm:rounded-2xl sm:p-4"
                 >
                   <div className="mb-2 flex items-start gap-2 sm:mb-3 sm:gap-3">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-mint-light text-mint sm:size-11 sm:rounded-xl">
-                      <Icon className="size-4 sm:size-5" />
-                    </div>
+                    <ProductVisual
+                      name={line.product.name}
+                      iconName={line.product.iconName}
+                      size="sm"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold sm:text-base">
                         {line.product.name}
@@ -127,8 +127,7 @@ export function CartPanel({
                     ))}
                   </div>
                 </div>
-              );
-            })
+              ))
           )}
         </div>
 

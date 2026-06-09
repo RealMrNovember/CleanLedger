@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS `products` (
   `id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
   `name` text NOT NULL,
   `icon_name` text NOT NULL,
-  `base_price` real NOT NULL
+  `base_price` real NOT NULL,
+  `sort_order` integer DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS `orders` (

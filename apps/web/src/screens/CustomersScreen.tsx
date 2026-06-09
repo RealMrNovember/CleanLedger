@@ -6,7 +6,6 @@ import type { CustomerListMeta } from "@/db/schema";
 import {
   getCustomers,
   createCustomer,
-  deleteCustomer,
   getCustomerListMeta,
   getCustomerTags,
   initDatabase,
@@ -84,19 +83,13 @@ export function CustomersScreen() {
     await load();
   };
 
-  const handleDelete = async (id: number, displayName: string) => {
-    if (!confirm(`${displayName} müşterisini silmek istediğinize emin misiniz?`)) return;
-    await deleteCustomer(id);
-    await load();
-  };
-
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
         <div>
           <h1 className="text-2xl font-bold">Müşteriler</h1>
           <p className="text-sm text-muted-foreground">
-            CRM — müşteri kayıtları ve sipariş geçmişi
+            CRM — müşteri kayıtları ve kalıcı işlem geçmişi
           </p>
         </div>
         <Button onClick={() => setDialogOpen(true)} className="gap-2">
@@ -184,14 +177,6 @@ export function CustomersScreen() {
                     </div>
                     <ChevronRight className="size-5 text-muted-foreground" />
                   </Link>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive"
-                    onClick={() => void handleDelete(c.id, formatCustomerName(c))}
-                  >
-                    Sil
-                  </Button>
                 </CardContent>
               </Card>
             );

@@ -106,6 +106,38 @@
   box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.2);
 }
 
+/* POS panel resize — touch-friendly without breaking layout */
+[data-panel-group] {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+[data-panel-group][data-panel-group-direction="horizontal"] {
+  flex-direction: row;
+}
+
+[data-panel-group][data-panel-group-direction="vertical"] {
+  flex-direction: column;
+}
+
+[data-panel-resize-handle-id] {
+  touch-action: none;
+  user-select: none;
+}
+
+@media (max-width: 1023px) {
+  [data-panel-resize-handle-id][data-panel-group-direction="vertical"] {
+    min-height: 28px;
+  }
+
+  [data-panel-resize-handle-id][data-panel-group-direction="horizontal"] {
+    min-width: 28px;
+  }
+}
+
 @media print {
   @page {
     size: 80mm auto;
@@ -114,6 +146,28 @@
 
   body * {
     visibility: hidden !important;
+  }
+
+  body.printing-report * {
+    visibility: hidden !important;
+  }
+
+  body.printing-report #cleanledger-report,
+  body.printing-report #cleanledger-report * {
+    visibility: visible !important;
+  }
+
+  body.printing-report #cleanledger-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none;
+    display: block !important;
+    margin: 0;
+    padding: 0;
+    background: #fff !important;
+    color: #000 !important;
   }
 
   #cleanledger-receipt,

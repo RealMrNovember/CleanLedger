@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 $dataDir = __DIR__ . '/data';
 $usersFile = $dataDir . '/users.json';
+$logFile = $dataDir . '/auth.log';
 
 if (!is_dir($dataDir)) {
     mkdir($dataDir, 0755, true);
@@ -23,16 +24,46 @@ if (!file_exists($usersFile)) {
     file_put_contents($usersFile, json_encode([]));
 }
 
+function authLog(string $event, array $context = []): void
+{
+    global $logFile;
+    $entry = [
+        'ts' => date('c'),
+        'event' => $event,
+        'method' => $_SERVER['REQUEST_METHOD'] ?? '',
+        'action' => $_GET['action'] ?? '',
+        'origin' => $_SERVER['HTTP_ORIGIN'] ?? '',
+        'ua' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+    ] + $context;
+    file_put_contents(
+        $logFile,
+        json_encode($entry, JSON_UNESCAPED_UNICODE) . PHP_EOL,
+        FILE_APPEND | LOCK_EX
+    );
+}
+
 function readUsers(string $file): array
 {
-    $raw = file_get_contents($file);
+    $raw = @file_get_contents($file);
+    if ($raw === false) {
+        authLog('users_read_failed', ['file' => $file, 'reason' => 'file_get_contents_failed']);
+        return [];
+    }
     $data = json_decode($raw ?: '[]', true);
-    return is_array($data) ? $data : [];
+    if (!is_array($data)) {
+        authLog('users_read_failed', ['file' => $file, 'reason' => 'json_decode_failed']);
+        return [];
+    }
+    return $data;
 }
 
 function writeUsers(string $file, array $users): void
 {
-    file_put_contents($file, json_encode($users, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $ok = file_put_contents($file, json_encode($users, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    if ($ok === false) {
+        authLog('users_write_failed', ['file' => $file, 'reason' => 'file_put_contents_failed']);
+    }
 }
 
 function respond(int $code, array $payload): void
@@ -107,17 +138,65 @@ if ($action === 'login') {
     $email = strtolower(trim($body['email'] ?? ''));
     $password = $body['password'] ?? '';
 
+    authLog('login_attempt', [
+        'email' => $email !== '' ? $email : '(empty)',
+        'has_password' => $password !== '',
+        'user_count' => count($users),
+    ]);
+
     if ($email === '' || $password === '') {
-        respond(422, ['success' => false, 'message' => 'E-posta ve şifre gerekli.']);
+        authLog('login_failed', ['reason' => 'missing_fields', 'email' => $email]);
+        respond(422, [
+            'success' => false,
+            'code' => 'MISSING_FIELDS',
+            'message' => 'E-posta ve şifre gerekli.',
+        ]);
     }
 
+    if ($users === [] && !file_exists($usersFile)) {
+        authLog('login_failed', ['reason' => 'users_file_missing', 'email' => $email]);
+        respond(500, [
+            'success' => false,
+            'code' => 'USERS_STORE_UNAVAILABLE',
+            'message' => 'Kullanıcı deposu okunamadı.',
+        ]);
+    }
+
+    $userFound = false;
     foreach ($users as &$u) {
         if (strtolower($u['email']) === $email) {
+            $userFound = true;
+            if (!isset($u['passwordHash']) || !is_string($u['passwordHash'])) {
+                authLog('login_failed', [
+                    'reason' => 'password_hash_missing',
+                    'email' => $email,
+                    'user_id' => $u['id'] ?? null,
+                ]);
+                respond(500, [
+                    'success' => false,
+                    'code' => 'PASSWORD_HASH_MISSING',
+                    'message' => 'Hesap kaydı bozuk. Destek ile iletişime geçin.',
+                ]);
+            }
             if (!password_verify($password, $u['passwordHash'])) {
-                respond(401, ['success' => false, 'message' => 'E-posta veya şifre hatalı.']);
+                authLog('login_failed', [
+                    'reason' => 'wrong_password',
+                    'email' => $email,
+                    'user_id' => $u['id'] ?? null,
+                ]);
+                respond(401, [
+                    'success' => false,
+                    'code' => 'WRONG_PASSWORD',
+                    'message' => 'E-posta veya şifre hatalı.',
+                ]);
             }
             $u['token'] = generateToken();
             writeUsers($usersFile, $users);
+            authLog('login_success', [
+                'email' => $email,
+                'user_id' => $u['id'] ?? null,
+                'token_prefix' => substr($u['token'], 0, 8),
+            ]);
             respond(200, [
                 'success' => true,
                 'token' => $u['token'],
@@ -134,7 +213,15 @@ if ($action === 'login') {
     }
     unset($u);
 
-    respond(401, ['success' => false, 'message' => 'E-posta veya şifre hatalı.']);
+    authLog('login_failed', [
+        'reason' => $userFound ? 'unknown' : 'user_not_found',
+        'email' => $email,
+    ]);
+    respond(401, [
+        'success' => false,
+        'code' => 'USER_NOT_FOUND',
+        'message' => 'E-posta veya şifre hatalı.',
+    ]);
 }
 
 if ($action === 'profile') {

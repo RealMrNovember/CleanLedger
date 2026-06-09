@@ -64,29 +64,27 @@ export function CustomerPanel({
           </div>
         )}
 
-        <div className="space-y-2">
+        <div className="space-y-3">
           <label className="text-sm font-medium text-muted-foreground">
             Telefon Numarası
           </label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              type="tel"
-              inputMode="tel"
-              placeholder="05XX XXX XX XX"
-              value={phone}
-              onChange={(e) => onPhoneChange(e.target.value)}
-              className="h-12 flex-1 text-lg font-medium tracking-wide sm:h-14 sm:text-xl"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-12 shrink-0 gap-2 sm:h-14"
-              onClick={onPickCustomer}
-            >
-              <Users className="size-4" />
-              Müşteri Ara/Seç
-            </Button>
-          </div>
+          <Input
+            type="tel"
+            inputMode="tel"
+            placeholder="05XX XXX XX XX"
+            value={phone}
+            onChange={(e) => onPhoneChange(e.target.value)}
+            className="h-14 w-full text-xl font-medium tracking-wide"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-12 w-full gap-2"
+            onClick={onPickCustomer}
+          >
+            <Users className="size-4" />
+            Müşteri Ara/Seç
+          </Button>
         </div>
 
         {showNameFields && (

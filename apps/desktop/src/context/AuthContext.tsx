@@ -165,7 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isValidSession(next)) {
       throw new Error("Geçersiz oturum yanıtı alındı.");
     }
-    await verifyLicense();
+    try {
+      await verifyLicense();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Lisans doğrulaması başarısız.";
+      console.warn("[CleanLedger] Lisans doğrulaması atlandı:", message);
+    }
     persistSession(next);
     const org = await syncOrganization(next);
     setSession(next);

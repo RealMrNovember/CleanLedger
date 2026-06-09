@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "prebuild": "cp -f index.template.html index.html",
     "deploy:live": "npm run build && node scripts/deploy-live.mjs"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "lucide-react": "^0.513.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-resizable-panels": "^2.1.9",
     "react-router-dom": "^7.6.2",
     "tailwind-merge": "^3.3.0"
   },
