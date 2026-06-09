@@ -1,26 +1,52 @@
-import { Phone, CalendarDays, Zap, AlertTriangle, User, Users } from "lucide-react";
-import type { OrderPriority } from "@/db/schema";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Phone,
+  CalendarDays,
+  Zap,
+  AlertTriangle,
+  User,
+  Users,
+  ChevronDown,
+  ChevronUp,
+  History,
+  Search,
+} from "lucide-react";
+import type { Customer, Order, OrderPriority } from "@/db/schema";
 import { ORDER_PRIORITY_LABELS } from "@/db/schema";
+import { getCustomers, getCustomerOrdersByPhone } from "@/db/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatCurrency, cn } from "@/lib/utils";
+import { formatDate, formatCurrency, formatCustomerName, cn } from "@/lib/utils";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
+
+type CustomerTab = "info" | "history";
 
 interface CustomerPanelProps {
   phone: string;
   firstName: string;
   lastName: string;
   isRegistered: boolean;
+  customerId?: number | null;
   creditDebt?: number;
   onPhoneChange: (value: string) => void;
   onFirstNameChange: (value: string) => void;
   onLastNameChange: (value: string) => void;
-  onPickCustomer: () => void;
+  onSelectCustomer: (customer: Customer) => void;
   deliveryDate: string;
   onDeliveryDateChange: (value: string) => void;
   priority: OrderPriority;
   onPriorityChange: (value: OrderPriority) => void;
+}
+
+function formatOrderDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("tr-TR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function CustomerPanel({
@@ -28,11 +54,12 @@ export function CustomerPanel({
   firstName,
   lastName,
   isRegistered,
+  customerId,
   creditDebt = 0,
   onPhoneChange,
   onFirstNameChange,
   onLastNameChange,
-  onPickCustomer,
+  onSelectCustomer,
   deliveryDate,
   onDeliveryDateChange,
   priority,
@@ -41,148 +68,306 @@ export function CustomerPanel({
   const today = toDateKey(new Date());
   const tomorrow = toDateKey(addDaysToDate(new Date(), 1));
   const dayAfter = toDateKey(addDaysToDate(new Date(), 3));
-  const showNameFields = phone.trim().length >= 10;
+  const showDetails = phone.trim().length >= 10;
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<CustomerTab>("info");
+  const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pickerOpen) {
+      setPickerQuery("");
+      return;
+    }
+    setPickerLoading(true);
+    void getCustomers()
+      .then(setCustomers)
+      .finally(() => setPickerLoading(false));
+  }, [pickerOpen]);
+
+  const filteredCustomers = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter((c) => {
+      const full = formatCustomerName(c).toLowerCase();
+      return full.includes(q) || c.phone.includes(q);
+    });
+  }, [customers, pickerQuery]);
+
+  const loadHistory = useCallback(async () => {
+    const trimmed = phone.trim();
+    if (trimmed.length < 10) {
+      setHistoryOrders([]);
+      return;
+    }
+    setHistoryLoading(true);
+    try {
+      const { orders } = await getCustomerOrdersByPhone(trimmed);
+      setHistoryOrders(orders);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [phone]);
+
+  useEffect(() => {
+    if (showDetails) {
+      void loadHistory();
+    } else {
+      setHistoryOrders([]);
+    }
+  }, [showDetails, customerId, loadHistory]);
+
+  const handleSelectCustomer = (customer: Customer) => {
+    onSelectCustomer(customer);
+    setPickerOpen(false);
+    setActiveTab("info");
+  };
 
   return (
-    <Card className="h-full w-full border-border/50 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
-      <CardHeader className="pb-3">
+    <Card className="flex h-full min-h-0 w-full flex-col overflow-hidden border-border/50 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
+      <CardHeader className="shrink-0 pb-2">
         <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground/80">
           <Phone className="size-5 text-mint" />
           Müşteri
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-5">
-        {creditDebt > 0 && (
-          <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-4 text-center shadow-sm">
-            <AlertTriangle className="mx-auto mb-2 size-8 text-red-600" />
-            <p className="text-lg font-bold text-red-700">
-              Müşterinin {formatCurrency(creditDebt)} Borcu Var!
-            </p>
-            <p className="mt-1 text-xs text-red-600">
-              Cari hesapta bekleyen bakiye mevcut.
-            </p>
-          </div>
-        )}
 
-        <div className="space-y-2">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4 pt-0">
+        <div className="shrink-0 space-y-2">
           <label className="text-sm font-medium text-muted-foreground">
             Telefon Numarası
           </label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              type="tel"
-              inputMode="tel"
-              placeholder="05XX XXX XX XX"
-              value={phone}
-              onChange={(e) => onPhoneChange(e.target.value)}
-              className="h-12 flex-1 text-lg font-medium tracking-wide sm:h-14 sm:text-xl"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-12 shrink-0 gap-2 sm:h-14"
-              onClick={onPickCustomer}
-            >
-              <Users className="size-4" />
-              Müşteri Ara/Seç
-            </Button>
-          </div>
+          <Input
+            type="tel"
+            inputMode="tel"
+            placeholder="05XX XXX XX XX"
+            value={phone}
+            onChange={(e) => onPhoneChange(e.target.value)}
+            className="h-11 w-full text-base font-medium tracking-wide"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full gap-2"
+            onClick={() => setPickerOpen((v) => !v)}
+          >
+            <Users className="size-4" />
+            Müşteri Seç
+            {pickerOpen ? (
+              <ChevronUp className="ml-auto size-4" />
+            ) : (
+              <ChevronDown className="ml-auto size-4" />
+            )}
+          </Button>
         </div>
 
-        {showNameFields && (
-          <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
-            <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <User className="size-4 text-trust" />
-              {isRegistered ? "Müşteri Bilgisi" : "Yeni Müşteri Kaydı"}
-            </label>
-            <div>
-              <label className="mb-1 block text-xs font-medium">
-                Ad <span className="text-destructive">*</span>
-              </label>
+        {pickerOpen && (
+          <div className="shrink-0 space-y-2 rounded-xl border border-border/60 bg-muted/20 p-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                value={firstName}
-                onChange={(e) => onFirstNameChange(e.target.value)}
-                placeholder="Ad"
-                className="h-11"
-                required
+                value={pickerQuery}
+                onChange={(e) => setPickerQuery(e.target.value)}
+                placeholder="Ad, soyad veya telefon..."
+                className="h-9 pl-8 text-sm"
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium">Soyad</label>
-              <Input
-                value={lastName}
-                onChange={(e) => onLastNameChange(e.target.value)}
-                placeholder="Soyad (opsiyonel)"
-                className="h-11"
-              />
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-border/50 bg-background">
+              {pickerLoading ? (
+                <p className="p-3 text-center text-xs text-muted-foreground">
+                  Yükleniyor...
+                </p>
+              ) : filteredCustomers.length === 0 ? (
+                <p className="p-3 text-center text-xs text-muted-foreground">
+                  Müşteri bulunamadı.
+                </p>
+              ) : (
+                <ul>
+                  {filteredCustomers.map((customer) => (
+                    <li key={customer.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustomer(customer)}
+                        className="flex w-full items-center gap-2 border-b border-border/30 px-3 py-2 text-left text-sm transition hover:bg-mint-light/40 last:border-0"
+                      >
+                        <User className="size-4 shrink-0 text-trust" />
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {formatCustomerName(customer)}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {customer.phone}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            {isRegistered && firstName && (
-              <p className="text-xs text-mint">
-                Kayıtlı müşteri — bilgileri güncelleyebilirsiniz.
-              </p>
-            )}
           </div>
         )}
 
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <CalendarDays className="size-4 text-mint" />
-            Teslim Tarihi
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { label: "Bugün", value: today },
-              { label: "Yarın", value: tomorrow },
-              { label: "+3 Gün", value: dayAfter },
-            ].map((opt) => (
-              <Button
-                key={opt.value}
-                type="button"
-                variant={deliveryDate === opt.value ? "default" : "outline"}
-                size="sm"
-                className="h-10 text-xs"
-                onClick={() => onDeliveryDateChange(opt.value)}
-              >
-                {opt.label}
-              </Button>
-            ))}
-          </div>
-          <Input
-            type="date"
-            value={deliveryDate}
-            onChange={(e) => onDeliveryDateChange(e.target.value)}
-            className="h-11"
-          />
-          <p className="text-sm font-medium text-foreground">
-            {formatDate(new Date(deliveryDate + "T12:00:00"))}
-          </p>
-        </div>
+        {showDetails && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/10">
+            {creditDebt > 0 && (
+              <div className="shrink-0 border-b border-red-200 bg-red-50 p-3 text-center dark:border-red-900 dark:bg-red-950/40">
+                <AlertTriangle className="mx-auto mb-1 size-5 text-red-600" />
+                <p className="text-sm font-bold text-red-700 dark:text-red-400">
+                  {formatCurrency(creditDebt)} borç
+                </p>
+              </div>
+            )}
 
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Zap className="size-4 text-[#e85d04]" />
-            Öncelik
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {(["normal", "urgent"] as OrderPriority[]).map((p) => (
+            <div className="flex shrink-0 border-b border-border/50">
               <button
-                key={p}
                 type="button"
-                onClick={() => onPriorityChange(p)}
+                onClick={() => setActiveTab("info")}
                 className={cn(
-                  "rounded-xl py-3 text-sm font-semibold transition",
-                  priority === p
-                    ? p === "urgent"
-                      ? "bg-gradient-to-r from-[#e85d04] to-[#f48c06] text-white shadow-md ring-2 ring-[#e85d04]/40"
-                      : "bg-muted text-foreground ring-2 ring-border"
-                    : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                  "flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition sm:text-sm",
+                  activeTab === "info"
+                    ? "border-b-2 border-mint text-[#0f3d3a]"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {p === "urgent" ? "ACİL" : ORDER_PRIORITY_LABELS[p]}
+                <User className="size-3.5" />
+                Bilgiler
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => setActiveTab("history")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition sm:text-sm",
+                  activeTab === "history"
+                    ? "border-b-2 border-mint text-[#0f3d3a]"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <History className="size-3.5" />
+                Geçmiş İşlemler
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {activeTab === "info" ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <User className="size-3.5 text-trust" />
+                      {isRegistered ? "Müşteri Bilgisi" : "Yeni Müşteri Kaydı"}
+                    </label>
+                    <Input
+                      value={firstName}
+                      onChange={(e) => onFirstNameChange(e.target.value)}
+                      placeholder="Ad *"
+                      className="h-10"
+                      required
+                    />
+                    <Input
+                      value={lastName}
+                      onChange={(e) => onLastNameChange(e.target.value)}
+                      placeholder="Soyad (opsiyonel)"
+                      className="h-10"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <CalendarDays className="size-3.5 text-mint" />
+                      Teslim Tarihi
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { label: "Bugün", value: today },
+                        { label: "Yarın", value: tomorrow },
+                        { label: "+3 Gün", value: dayAfter },
+                      ].map((opt) => (
+                        <Button
+                          key={opt.value}
+                          type="button"
+                          variant={deliveryDate === opt.value ? "default" : "outline"}
+                          size="sm"
+                          className="h-8 text-[10px] sm:text-xs"
+                          onClick={() => onDeliveryDateChange(opt.value)}
+                        >
+                          {opt.label}
+                        </Button>
+                      ))}
+                    </div>
+                    <Input
+                      type="date"
+                      value={deliveryDate}
+                      onChange={(e) => onDeliveryDateChange(e.target.value)}
+                      className="h-9"
+                    />
+                    <p className="text-xs font-medium">
+                      {formatDate(new Date(deliveryDate + "T12:00:00"))}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <Zap className="size-3.5 text-[#e85d04]" />
+                      Öncelik
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["normal", "urgent"] as OrderPriority[]).map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => onPriorityChange(p)}
+                          className={cn(
+                            "rounded-lg py-2 text-xs font-semibold transition",
+                            priority === p
+                              ? p === "urgent"
+                                ? "bg-gradient-to-r from-[#e85d04] to-[#f48c06] text-white shadow-sm"
+                                : "bg-muted text-foreground ring-1 ring-border"
+                              : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          {p === "urgent" ? "ACİL" : ORDER_PRIORITY_LABELS[p]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Tüm geçmiş siparişler (salt okunur)
+                  </p>
+                  {historyLoading ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      Yükleniyor...
+                    </p>
+                  ) : historyOrders.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      Bu müşteriye ait geçmiş sipariş yok.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {historyOrders.map((order) => (
+                        <li
+                          key={order.id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-border/50 bg-background px-2.5 py-2 text-xs"
+                        >
+                          <span className="min-w-0 truncate text-muted-foreground">
+                            {formatOrderDateTime(order.createdAt)}
+                          </span>
+                          <span className="shrink-0 font-bold text-trust">
+                            {formatCurrency(order.totalAmount)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -26,21 +26,34 @@ export async function pullSync(): Promise<DatabaseSnapshotPayload | null> {
   const token = readToken();
   if (!token) return null;
 
-  const res = await fetch(
-    `${SYNC_API_URL}?action=pull&token=${encodeURIComponent(token)}`,
-    { headers: { Accept: "application/json" } }
-  );
-  const json = (await res.json()) as {
-    success: boolean;
-    payload?: Record<string, unknown> | null;
-    updatedAt?: string | null;
-  };
-  if (!res.ok || !json.success || !json.payload) return null;
-  return {
-    version: 1,
-    updatedAt: json.updatedAt ?? new Date().toISOString(),
-    data: json.payload as DatabaseSnapshotPayload["data"],
-  };
+  try {
+    const res = await fetch(
+      `${SYNC_API_URL}?action=pull&token=${encodeURIComponent(token)}`,
+      { headers: { Accept: "application/json" } }
+    );
+    const raw = await res.text();
+    type PullResponse = {
+      success?: boolean;
+      payload?: Record<string, unknown> | null;
+      updatedAt?: string | null;
+    };
+    let json: PullResponse | null = null;
+    try {
+      json = raw ? (JSON.parse(raw) as PullResponse) : null;
+    } catch {
+      console.warn("[CleanLedger] Sync pull geçersiz JSON döndü.");
+      return null;
+    }
+    if (!json || !res.ok || !json.success || !json.payload) return null;
+    return {
+      version: 1,
+      updatedAt: json.updatedAt ?? new Date().toISOString(),
+      data: json.payload as DatabaseSnapshotPayload["data"],
+    };
+  } catch (err) {
+    console.warn("[CleanLedger] Sync pull başarısız:", err);
+    return null;
+  }
 }
 
 export async function pushSync(snapshot: {

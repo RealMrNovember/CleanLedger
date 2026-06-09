@@ -1169,6 +1169,35 @@ export async function getCustomerHistoryDetails(
   );
 }
 
+export async function getCustomerOrdersByPhone(
+  phone: string
+): Promise<CustomerOrderSummary> {
+  const trimmed = phone.trim();
+  if (!trimmed) return { orders: [], totalSpent: 0 };
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      `SELECT * FROM orders WHERE customer_phone = ? ORDER BY created_at DESC`,
+      [trimmed]
+    );
+    const orders = rows.map(mapOrder);
+    return {
+      orders,
+      totalSpent: orders.reduce((s, o) => s + o.totalAmount, 0),
+    };
+  }
+
+  const local = loadLocalDb();
+  const orders = local.orders
+    .filter((o) => o.customerPhone === trimmed)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return {
+    orders,
+    totalSpent: orders.reduce((s, o) => s + o.totalAmount, 0),
+  };
+}
+
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
 function generateOrderNumber(seq: number): string {

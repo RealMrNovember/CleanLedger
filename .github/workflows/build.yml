@@ -47,7 +47,7 @@ jobs:
           VITE_LICENSE_API_URL: https://license.cicibyte.com
           VITE_LICENSE_APP_CODE: cleanledger
           VITE_LICENSE_API_KEY: Cicibyte_X92kLpQ84mNz_2026!
-        run: npm run tauri build
+        run: npm run tauri build -- --no-sign
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -56,8 +56,7 @@ jobs:
           path: |
             apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
             apps/desktop/src-tauri/target/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/release/bundle/nsis/*latest.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
       - name: Publish rolling release on main
@@ -72,7 +71,7 @@ jobs:
           allowUpdates: true
           makeLatest: true
           prerelease: true
-          artifacts: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe,apps/desktop/src-tauri/target/release/bundle/msi/*.msi,apps/desktop/src-tauri/target/release/bundle/nsis/*latest.json
+          artifacts: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe,apps/desktop/src-tauri/target/release/bundle/msi/*.msi
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish versioned release
