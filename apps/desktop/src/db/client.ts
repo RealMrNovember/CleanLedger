@@ -1,48 +1,76 @@
 import type {
   Product,
   Customer,
+  CustomerTag,
+  Coupon,
   Order,
   OrderItem,
   ServiceType,
   ServicePrice,
   PaymentStatus,
+  PaymentMethod,
   OrderStatus,
   OrderPriority,
+  CouponType,
+  TagColor,
   OrderWithMeta,
   OrderDashboardStats,
   CustomerListMeta,
   OrganizationSettings,
 } from "./schema";
-import { SERVICE_PRICE_MODIFIERS, SERVICE_TYPES } from "./schema";
+import {
+  SERVICE_PRICE_MODIFIERS,
+  SERVICE_TYPES,
+  DEFAULT_CUSTOMER_TAGS,
+} from "./schema";
 import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
 
 const STORAGE_KEY = "cleanledger_db_v3";
-const ORG_STORAGE_KEY = "cleanledger_org_v1";
+const LEGACY_STORAGE_KEY = "cleanledger_db_v2";
+const ORG_STORAGE_KEY = "cleanledger_web_org_v1";
 
-interface LocalDb {
+export interface LocalDb {
   products: Product[];
   customers: Customer[];
+  customerTags: CustomerTag[];
+  coupons: Coupon[];
   servicePrices: ServicePrice[];
   orders: Order[];
   orderItems: OrderItem[];
   nextProductId: number;
   nextCustomerId: number;
+  nextCustomerTagId: number;
+  nextCouponId: number;
   nextServicePriceId: number;
   nextOrderId: number;
   nextOrderItemId: number;
   nextOrderNumber: number;
 }
 
+function seedDefaultTags(startId = 1): CustomerTag[] {
+  return DEFAULT_CUSTOMER_TAGS.map((t, i) => ({
+    id: startId + i,
+    slug: t.slug,
+    label: t.label,
+    color: t.color,
+  }));
+}
+
 function emptyDb(): LocalDb {
+  const tags = seedDefaultTags();
   return {
     products: [],
     customers: [],
+    customerTags: tags,
+    coupons: [],
     servicePrices: [],
     orders: [],
     orderItems: [],
     nextProductId: 1,
     nextCustomerId: 1,
+    nextCustomerTagId: tags.length + 1,
+    nextCouponId: 1,
     nextServicePriceId: 1,
     nextOrderId: 1,
     nextOrderItemId: 1,
@@ -50,11 +78,46 @@ function emptyDb(): LocalDb {
   };
 }
 
+function migrateLegacyDb(parsed: Record<string, unknown>): LocalDb {
+  const base = emptyDb();
+  const merged: LocalDb = {
+    ...base,
+    ...(parsed as Partial<LocalDb>),
+    customerTags:
+      Array.isArray(parsed.customerTags) && parsed.customerTags.length
+        ? (parsed.customerTags as CustomerTag[])
+        : base.customerTags,
+    coupons: Array.isArray(parsed.coupons) ? (parsed.coupons as Coupon[]) : [],
+    customers: (Array.isArray(parsed.customers) ? parsed.customers : []).map(
+      (c) => mapCustomer(c as Record<string, unknown>)
+    ),
+    orders: (Array.isArray(parsed.orders) ? parsed.orders : []).map((o) =>
+      mapOrder(o as Record<string, unknown>)
+    ),
+    nextCustomerTagId: num(parsed.nextCustomerTagId, base.nextCustomerTagId),
+    nextCouponId: num(parsed.nextCouponId, 1),
+  };
+  return merged;
+}
+
 function loadLocalDb(): LocalDb {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyDb();
-    return JSON.parse(raw) as LocalDb;
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (legacy) {
+        const migrated = migrateLegacyDb(JSON.parse(legacy) as Record<string, unknown>);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        return migrated;
+      }
+      return emptyDb();
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!Array.isArray(parsed.customerTags)) {
+      return migrateLegacyDb(parsed);
+    }
+    return parsed as unknown as LocalDb;
   } catch {
     return emptyDb();
   }
@@ -62,6 +125,11 @@ function loadLocalDb(): LocalDb {
 
 function saveLocalDb(db: LocalDb): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  triggerSyncPush();
+}
+
+function triggerSyncPush(): void {
+  void import("@/lib/sync-service").then((m) => m.scheduleSyncPush());
 }
 
 function isTauri(): boolean {
@@ -109,6 +177,26 @@ export function mapProduct(row: Record<string, unknown>): Product {
   };
 }
 
+export function mapCustomerTag(row: Record<string, unknown>): CustomerTag {
+  return {
+    id: num(row.id),
+    slug: String(row.slug ?? ""),
+    label: String(row.label ?? ""),
+    color: String(row.color ?? "slate") as TagColor,
+  };
+}
+
+export function mapCoupon(row: Record<string, unknown>): Coupon {
+  return {
+    id: num(row.id),
+    code: String(row.code ?? "").toUpperCase(),
+    type: String(row.type ?? "percent") as CouponType,
+    value: num(row.value),
+    active: num(row.active, 1),
+    createdAt: String(row.created_at ?? row.createdAt ?? ""),
+  };
+}
+
 export function mapCustomer(row: Record<string, unknown>): Customer {
   return {
     id: num(row.id),
@@ -116,6 +204,8 @@ export function mapCustomer(row: Record<string, unknown>): Customer {
     phone: String(row.phone ?? ""),
     notes: String(row.notes ?? ""),
     address: String(row.address ?? ""),
+    tagId: num(row.tag_id ?? row.tagId, 1),
+    creditBalance: num(row.credit_balance ?? row.creditBalance, 0),
     createdAt: String(row.created_at ?? row.createdAt ?? ""),
     updatedAt: String(row.updated_at ?? row.updatedAt ?? ""),
   };
@@ -164,6 +254,27 @@ export function mapOrder(row: Record<string, unknown>): Order {
     priority = "normal";
   }
 
+  const subtotalAmount = num(
+    row.subtotal_amount ?? row.subtotalAmount ?? row.total_amount ?? row.totalAmount,
+    0
+  );
+  const discountAmount = num(row.discount_amount ?? row.discountAmount, 0);
+  const totalAmount = num(
+    row.total_amount ?? row.totalAmount,
+    Math.max(0, subtotalAmount - discountAmount)
+  );
+  const amountPaid = num(row.amount_paid ?? row.amountPaid, 0);
+  const balanceDue = num(
+    row.balance_due ?? row.balanceDue,
+    Math.max(0, totalAmount - amountPaid)
+  );
+  let paymentMethod = String(
+    row.payment_method ?? row.paymentMethod ?? "cash"
+  ) as PaymentMethod;
+  if (paymentMethod !== "cash" && paymentMethod !== "card") {
+    paymentMethod = "cash";
+  }
+
   return {
     id: num(row.id),
     orderNumber: String(row.order_number ?? row.orderNumber ?? ""),
@@ -172,7 +283,16 @@ export function mapOrder(row: Record<string, unknown>): Order {
         ? num(row.customer_id ?? row.customerId)
         : null,
     customerPhone: String(row.customer_phone ?? row.customerPhone ?? ""),
-    totalAmount: num(row.total_amount ?? row.totalAmount),
+    subtotalAmount,
+    discountAmount,
+    totalAmount,
+    amountPaid,
+    balanceDue,
+    paymentMethod,
+    couponCode:
+      row.coupon_code != null || row.couponCode != null
+        ? String(row.coupon_code ?? row.couponCode)
+        : null,
     paymentStatus,
     orderStatus,
     deliveryDate,
@@ -298,6 +418,66 @@ async function runMigrations(): Promise<void> {
       updated_at TEXT NOT NULL
     )
   `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS customer_tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT 'slate'
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS coupons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL,
+      value REAL NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  const tagCols = [
+    `ALTER TABLE customers ADD COLUMN tag_id INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE customers ADD COLUMN credit_balance REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN subtotal_amount REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN amount_paid REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN balance_due REAL NOT NULL DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash'`,
+    `ALTER TABLE orders ADD COLUMN coupon_code TEXT`,
+  ];
+  for (const sql of tagCols) {
+    try {
+      await db.execute(sql);
+    } catch {
+      /* exists */
+    }
+  }
+
+  const existingTags = await db.select<{ count: number }>(
+    "SELECT COUNT(*) as count FROM customer_tags"
+  );
+  if ((existingTags[0]?.count ?? 0) === 0) {
+    for (const t of DEFAULT_CUSTOMER_TAGS) {
+      await db.execute(
+        "INSERT INTO customer_tags (slug, label, color) VALUES (?, ?, ?)",
+        [t.slug, t.label, t.color]
+      );
+    }
+  }
+
+  await db.execute(
+    `UPDATE orders SET subtotal_amount = total_amount WHERE subtotal_amount IS NULL OR subtotal_amount = 0`
+  );
+  await db.execute(
+    `UPDATE orders SET amount_paid = total_amount WHERE payment_status = 'paid' AND (amount_paid IS NULL OR amount_paid = 0)`
+  );
+  await db.execute(
+    `UPDATE orders SET balance_due = total_amount - amount_paid WHERE balance_due IS NULL`
+  );
 
   const defaultDelivery = toDateKey(addDaysToDate(new Date(), 3));
   await db.execute(
@@ -470,6 +650,7 @@ export async function updateServicePrice(
        ON CONFLICT(product_id, service_type) DO UPDATE SET price = excluded.price`,
       [productId, serviceType, price]
     );
+    triggerSyncPush();
     return;
   }
   const local = loadLocalDb();
@@ -519,6 +700,7 @@ export interface CustomerInput {
   phone: string;
   notes?: string;
   address?: string;
+  tagId?: number;
 }
 
 export async function getCustomers(): Promise<Customer[]> {
@@ -563,11 +745,14 @@ export async function getCustomerById(id: number): Promise<Customer | null> {
 
 export async function createCustomer(input: CustomerInput): Promise<Customer> {
   const now = new Date().toISOString();
+  const tagId = input.tagId ?? 1;
   const data = {
     name: input.name.trim(),
     phone: input.phone.trim(),
     notes: input.notes?.trim() ?? "",
     address: input.address?.trim() ?? "",
+    tagId,
+    creditBalance: 0,
     createdAt: now,
     updatedAt: now,
   };
@@ -575,10 +760,20 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
   if (isTauri()) {
     const db = await getSqlDb();
     const result = await db.execute(
-      `INSERT INTO customers (name, phone, notes, address, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [data.name, data.phone, data.notes, data.address, data.createdAt, data.updatedAt]
+      `INSERT INTO customers (name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data.name,
+        data.phone,
+        data.notes,
+        data.address,
+        data.tagId,
+        data.creditBalance,
+        data.createdAt,
+        data.updatedAt,
+      ]
     );
+    triggerSyncPush();
     return { id: result.lastInsertId, ...data };
   }
 
@@ -594,19 +789,22 @@ export async function updateCustomer(
   input: CustomerInput
 ): Promise<Customer> {
   const now = new Date().toISOString();
+  const tagId = input.tagId ?? 1;
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute(
-      `UPDATE customers SET name = ?, phone = ?, notes = ?, address = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE customers SET name = ?, phone = ?, notes = ?, address = ?, tag_id = ?, updated_at = ? WHERE id = ?`,
       [
         input.name.trim(),
         input.phone.trim(),
         input.notes?.trim() ?? "",
         input.address?.trim() ?? "",
+        tagId,
         now,
         id,
       ]
     );
+    triggerSyncPush();
     return (await getCustomerById(id))!;
   }
 
@@ -616,6 +814,7 @@ export async function updateCustomer(
   c.phone = input.phone.trim();
   c.notes = input.notes?.trim() ?? "";
   c.address = input.address?.trim() ?? "";
+  c.tagId = tagId;
   c.updatedAt = now;
   saveLocalDb(local);
   return c;
@@ -676,7 +875,10 @@ function generateOrderNumber(seq: number): string {
 export interface CreateOrderInput {
   customerPhone: string;
   customerId?: number | null;
-  paymentStatus: PaymentStatus;
+  amountPaid: number;
+  paymentMethod: PaymentMethod;
+  couponCode?: string | null;
+  discountAmount?: number;
   orderStatus?: OrderStatus;
   deliveryDate: string;
   priority?: OrderPriority;
@@ -690,16 +892,48 @@ export interface CreateOrderInput {
 export async function createOrder(
   input: CreateOrderInput
 ): Promise<{ order: Order; items: OrderItem[] }> {
-  const totalAmount = input.items.reduce((sum, i) => sum + i.subtotal, 0);
+  const subtotalAmount = input.items.reduce((sum, i) => sum + i.subtotal, 0);
+  const discountAmount = Math.min(
+    input.discountAmount ?? 0,
+    subtotalAmount
+  );
+  const totalAmount = Math.max(0, subtotalAmount - discountAmount);
+  const amountPaid = Math.min(
+    Math.max(0, input.amountPaid),
+    totalAmount
+  );
+  const balanceDue = Math.max(0, totalAmount - amountPaid);
+  const paymentStatus: PaymentStatus =
+    balanceDue <= 0 ? "paid" : "unpaid";
   const createdAt = new Date().toISOString();
   const orderStatus = input.orderStatus ?? "preparing";
   const priority = input.priority ?? "normal";
+  const paymentMethod = input.paymentMethod;
+  const couponCode = input.couponCode?.trim().toUpperCase() || null;
   let customerId = input.customerId ?? null;
 
   if (!customerId) {
     const existing = await getCustomerByPhone(input.customerPhone);
     if (existing) customerId = existing.id;
   }
+
+  const applyCreditToCustomer = async (cid: number) => {
+    if (balanceDue <= 0) return;
+    if (isTauri()) {
+      const db = await getSqlDb();
+      await db.execute(
+        "UPDATE customers SET credit_balance = credit_balance + ? WHERE id = ?",
+        [balanceDue, cid]
+      );
+      return;
+    }
+    const local = loadLocalDb();
+    const c = local.customers.find((x) => x.id === cid);
+    if (c) {
+      c.creditBalance += balanceDue;
+      saveLocalDb(local);
+    }
+  };
 
   if (isTauri()) {
     const db = await getSqlDb();
@@ -709,14 +943,20 @@ export async function createOrder(
     const orderNumber = generateOrderNumber((countRow[0]?.count ?? 0) + 1);
 
     const result = await db.execute(
-      `INSERT INTO orders (order_number, customer_id, customer_phone, total_amount, payment_status, order_status, delivery_date, priority, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (order_number, customer_id, customer_phone, subtotal_amount, discount_amount, total_amount, amount_paid, balance_due, payment_method, coupon_code, payment_status, order_status, delivery_date, priority, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderNumber,
         customerId,
         input.customerPhone,
+        subtotalAmount,
+        discountAmount,
         totalAmount,
-        input.paymentStatus,
+        amountPaid,
+        balanceDue,
+        paymentMethod,
+        couponCode,
+        paymentStatus,
         orderStatus,
         input.deliveryDate,
         priority,
@@ -741,14 +981,23 @@ export async function createOrder(
       });
     }
 
+    if (customerId) await applyCreditToCustomer(customerId);
+
+    triggerSyncPush();
     return {
       order: {
         id: orderId,
         orderNumber,
         customerId,
         customerPhone: input.customerPhone,
+        subtotalAmount,
+        discountAmount,
         totalAmount,
-        paymentStatus: input.paymentStatus,
+        amountPaid,
+        balanceDue,
+        paymentMethod,
+        couponCode,
+        paymentStatus,
         orderStatus,
         deliveryDate: input.deliveryDate,
         priority,
@@ -767,8 +1016,14 @@ export async function createOrder(
     orderNumber,
     customerId,
     customerPhone: input.customerPhone,
+    subtotalAmount,
+    discountAmount,
     totalAmount,
-    paymentStatus: input.paymentStatus,
+    amountPaid,
+    balanceDue,
+    paymentMethod,
+    couponCode,
+    paymentStatus,
     orderStatus,
     deliveryDate: input.deliveryDate,
     priority,
@@ -787,6 +1042,11 @@ export async function createOrder(
     local.orderItems.push(row);
     return row;
   });
+
+  if (customerId) {
+    const c = local.customers.find((x) => x.id === customerId);
+    if (c && balanceDue > 0) c.creditBalance += balanceDue;
+  }
 
   saveLocalDb(local);
   return { order, items };
@@ -922,6 +1182,7 @@ export async function updateOrderPaymentStatus(
       "UPDATE orders SET payment_status = ? WHERE id = ?",
       [paymentStatus, orderId]
     );
+    triggerSyncPush();
     return;
   }
   const local = loadLocalDb();
@@ -940,6 +1201,7 @@ export async function updateOrderOrderStatus(
       orderStatus,
       orderId,
     ]);
+    triggerSyncPush();
     return;
   }
   const local = loadLocalDb();
@@ -952,6 +1214,8 @@ export async function getCustomerListMeta(
   customerId: number,
   phone: string
 ): Promise<CustomerListMeta> {
+  const creditDebt = await getCustomerCreditDebt(phone);
+
   if (isTauri()) {
     const db = await getSqlDb();
     const active = await db.select<{ count: number }>(
@@ -960,13 +1224,14 @@ export async function getCustomerListMeta(
       [customerId, phone]
     );
     const pending = await db.select<{ total: number }>(
-      `SELECT COALESCE(SUM(total_amount), 0) as total FROM orders
-       WHERE (customer_id = ? OR customer_phone = ?) AND payment_status = 'unpaid' AND order_status != 'delivered'`,
+      `SELECT COALESCE(SUM(balance_due), 0) as total FROM orders
+       WHERE (customer_id = ? OR customer_phone = ?) AND balance_due > 0 AND order_status != 'delivered'`,
       [customerId, phone]
     );
     return {
       hasActiveOrders: (active[0]?.count ?? 0) > 0,
       pendingAmount: pending[0]?.total ?? 0,
+      creditDebt,
     };
   }
 
@@ -981,9 +1246,248 @@ export async function getCustomerListMeta(
   return {
     hasActiveOrders: orders.length > 0,
     pendingAmount: orders
-      .filter((o) => o.paymentStatus === "unpaid")
-      .reduce((s, o) => s + o.totalAmount, 0),
+      .filter((o) => o.balanceDue > 0)
+      .reduce((s, o) => s + o.balanceDue, 0),
+    creditDebt,
   };
+}
+
+// ─── Customer tags ─────────────────────────────────────────────────────────────
+
+export async function getCustomerTags(): Promise<CustomerTag[]> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM customer_tags ORDER BY id"
+    );
+    return rows.map(mapCustomerTag);
+  }
+  return loadLocalDb().customerTags;
+}
+
+export async function getCustomerTagById(
+  id: number
+): Promise<CustomerTag | null> {
+  const tags = await getCustomerTags();
+  return tags.find((t) => t.id === id) ?? null;
+}
+
+export interface CustomerTagInput {
+  slug: string;
+  label: string;
+  color: TagColor;
+}
+
+export async function createCustomerTag(
+  input: CustomerTagInput
+): Promise<CustomerTag> {
+  const slug = input.slug.trim().toLowerCase().replace(/\s+/g, "-");
+  const label = input.label.trim();
+  const color = input.color;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      "INSERT INTO customer_tags (slug, label, color) VALUES (?, ?, ?)",
+      [slug, label, color]
+    );
+    triggerSyncPush();
+    return { id: result.lastInsertId, slug, label, color };
+  }
+
+  const local = loadLocalDb();
+  const tag: CustomerTag = {
+    id: local.nextCustomerTagId++,
+    slug,
+    label,
+    color,
+  };
+  local.customerTags.push(tag);
+  saveLocalDb(local);
+  return tag;
+}
+
+export async function updateCustomerTag(
+  id: number,
+  input: CustomerTagInput
+): Promise<CustomerTag> {
+  const slug = input.slug.trim().toLowerCase().replace(/\s+/g, "-");
+  const label = input.label.trim();
+  const color = input.color;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute(
+      "UPDATE customer_tags SET slug = ?, label = ?, color = ? WHERE id = ?",
+      [slug, label, color, id]
+    );
+    triggerSyncPush();
+    return (await getCustomerTagById(id))!;
+  }
+
+  const local = loadLocalDb();
+  const tag = local.customerTags.find((t) => t.id === id)!;
+  tag.slug = slug;
+  tag.label = label;
+  tag.color = color;
+  saveLocalDb(local);
+  return tag;
+}
+
+export async function deleteCustomerTag(id: number): Promise<void> {
+  if (id <= 4) {
+    throw new Error("Varsayılan etiketler silinemez.");
+  }
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute("UPDATE customers SET tag_id = 1 WHERE tag_id = ?", [id]);
+    await db.execute("DELETE FROM customer_tags WHERE id = ?", [id]);
+    triggerSyncPush();
+    return;
+  }
+
+  const local = loadLocalDb();
+  local.customers.forEach((c) => {
+    if (c.tagId === id) c.tagId = 1;
+  });
+  local.customerTags = local.customerTags.filter((t) => t.id !== id);
+  saveLocalDb(local);
+}
+
+// ─── Coupons ─────────────────────────────────────────────────────────────────
+
+export async function getCoupons(): Promise<Coupon[]> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM coupons ORDER BY id DESC"
+    );
+    return rows.map(mapCoupon);
+  }
+  return loadLocalDb().coupons;
+}
+
+export interface CouponInput {
+  code: string;
+  type: CouponType;
+  value: number;
+  active?: boolean;
+}
+
+export async function createCoupon(input: CouponInput): Promise<Coupon> {
+  const code = input.code.trim().toUpperCase();
+  const createdAt = new Date().toISOString();
+  const active = input.active !== false ? 1 : 0;
+  const value = Math.max(0, input.value);
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      "INSERT INTO coupons (code, type, value, active, created_at) VALUES (?, ?, ?, ?, ?)",
+      [code, input.type, value, active, createdAt]
+    );
+    triggerSyncPush();
+    return {
+      id: result.lastInsertId,
+      code,
+      type: input.type,
+      value,
+      active,
+      createdAt,
+    };
+  }
+
+  const local = loadLocalDb();
+  const coupon: Coupon = {
+    id: local.nextCouponId++,
+    code,
+    type: input.type,
+    value,
+    active,
+    createdAt,
+  };
+  local.coupons.push(coupon);
+  saveLocalDb(local);
+  return coupon;
+}
+
+export async function updateCoupon(
+  id: number,
+  input: CouponInput
+): Promise<Coupon> {
+  const code = input.code.trim().toUpperCase();
+  const active = input.active !== false ? 1 : 0;
+  const value = Math.max(0, input.value);
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute(
+      "UPDATE coupons SET code = ?, type = ?, value = ?, active = ? WHERE id = ?",
+      [code, input.type, value, active, id]
+    );
+    triggerSyncPush();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM coupons WHERE id = ?",
+      [id]
+    );
+    return mapCoupon(rows[0]);
+  }
+
+  const local = loadLocalDb();
+  const coupon = local.coupons.find((c) => c.id === id)!;
+  coupon.code = code;
+  coupon.type = input.type;
+  coupon.value = value;
+  coupon.active = active;
+  saveLocalDb(local);
+  return coupon;
+}
+
+export async function deleteCoupon(id: number): Promise<void> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute("DELETE FROM coupons WHERE id = ?", [id]);
+    triggerSyncPush();
+    return;
+  }
+  const local = loadLocalDb();
+  local.coupons = local.coupons.filter((c) => c.id !== id);
+  saveLocalDb(local);
+}
+
+export function calculateCouponDiscount(
+  subtotal: number,
+  coupon: Coupon
+): number {
+  if (!coupon.active) return 0;
+  if (coupon.type === "percent") {
+    return Math.min(subtotal, Math.round(subtotal * (coupon.value / 100)));
+  }
+  return Math.min(subtotal, coupon.value);
+}
+
+export async function validateCouponCode(
+  code: string,
+  subtotal: number
+): Promise<{ coupon: Coupon; discount: number } | null> {
+  const normalized = code.trim().toUpperCase();
+  if (!normalized) return null;
+  const coupons = await getCoupons();
+  const coupon = coupons.find(
+    (c) => c.code === normalized && c.active === 1
+  );
+  if (!coupon) return null;
+  const discount = calculateCouponDiscount(subtotal, coupon);
+  if (discount <= 0) return null;
+  return { coupon, discount };
+}
+
+export async function getCustomerCreditDebt(phone: string): Promise<number> {
+  const normalized = phone.trim();
+  if (!normalized) return 0;
+  const customer = await getCustomerByPhone(normalized);
+  return customer?.creditBalance ?? 0;
 }
 
 // ─── Organization / Auth sync ────────────────────────────────────────────────
@@ -1066,4 +1570,246 @@ export async function clearOrganizationSettings(): Promise<void> {
     await db.execute("DELETE FROM organization_settings");
   }
   localStorage.removeItem(ORG_STORAGE_KEY);
+}
+
+// ─── Products CRUD ───────────────────────────────────────────────────────────
+
+export interface CreateProductInput {
+  name: string;
+  iconName: string;
+  basePrice: number;
+}
+
+export async function createProduct(input: CreateProductInput): Promise<Product> {
+  const name = input.name.trim();
+  const iconName = input.iconName.trim() || "default";
+  const basePrice = Math.max(0, input.basePrice);
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      "INSERT INTO products (name, icon_name, base_price) VALUES (?, ?, ?)",
+      [name, iconName, basePrice]
+    );
+    await seedServicePricesForProduct(result.lastInsertId, basePrice);
+    triggerSyncPush();
+    return {
+      id: result.lastInsertId,
+      name,
+      iconName,
+      basePrice,
+    };
+  }
+
+  const local = loadLocalDb();
+  const id = local.nextProductId++;
+  const product: Product = { id, name, iconName, basePrice };
+  local.products.push(product);
+  for (const st of SERVICE_TYPES) {
+    local.servicePrices.push({
+      id: local.nextServicePriceId++,
+      productId: id,
+      serviceType: st,
+      price: defaultPriceForService(basePrice, st),
+    });
+  }
+  saveLocalDb(local);
+  return product;
+}
+
+// ─── Order items detail ──────────────────────────────────────────────────────
+
+export interface OrderItemDetail extends OrderItem {
+  productName: string;
+}
+
+export async function getOrderItemsForOrder(
+  orderId: number
+): Promise<OrderItemDetail[]> {
+  const products = await getProducts();
+  const productMap = new Map(products.map((p) => [p.id, p.name]));
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM order_items WHERE order_id = ? ORDER BY id",
+      [orderId]
+    );
+    return rows.map((row) => {
+      const item = mapOrderItem(row);
+      return {
+        ...item,
+        productName: productMap.get(item.productId) ?? "Ürün",
+      };
+    });
+  }
+
+  return loadLocalDb()
+    .orderItems.filter((i) => i.orderId === orderId)
+    .map((item) => ({
+      ...item,
+      productName: productMap.get(item.productId) ?? "Ürün",
+    }));
+}
+
+// ─── Cloud sync snapshot ─────────────────────────────────────────────────────
+
+export interface DatabaseSnapshot {
+  version: 2;
+  updatedAt: string;
+  data: LocalDb;
+}
+
+async function buildLocalDbFromTauri(): Promise<LocalDb> {
+  const db = await getSqlDb();
+  const products = (
+    await db.select<Record<string, unknown>>("SELECT * FROM products ORDER BY id")
+  ).map(mapProduct);
+  const customers = (
+    await db.select<Record<string, unknown>>("SELECT * FROM customers ORDER BY id")
+  ).map(mapCustomer);
+  const customerTags = (
+    await db.select<Record<string, unknown>>(
+      "SELECT * FROM customer_tags ORDER BY id"
+    )
+  ).map(mapCustomerTag);
+  const coupons = (
+    await db.select<Record<string, unknown>>("SELECT * FROM coupons ORDER BY id")
+  ).map(mapCoupon);
+  const servicePrices = (
+    await db.select<Record<string, unknown>>("SELECT * FROM service_prices ORDER BY id")
+  ).map(mapServicePrice);
+  const orders = (
+    await db.select<Record<string, unknown>>("SELECT * FROM orders ORDER BY id")
+  ).map(mapOrder);
+  const orderItems = (
+    await db.select<Record<string, unknown>>("SELECT * FROM order_items ORDER BY id")
+  ).map(mapOrderItem);
+
+  const maxId = (arr: { id: number }[], fallback: number) =>
+    arr.length ? Math.max(...arr.map((x) => x.id)) + 1 : fallback;
+
+  return {
+    products,
+    customers,
+    customerTags: customerTags.length ? customerTags : seedDefaultTags(),
+    coupons,
+    servicePrices,
+    orders,
+    orderItems,
+    nextProductId: maxId(products, 1),
+    nextCustomerId: maxId(customers, 1),
+    nextCustomerTagId: maxId(customerTags, 5),
+    nextCouponId: maxId(coupons, 1),
+    nextServicePriceId: maxId(servicePrices, 1),
+    nextOrderId: maxId(orders, 1),
+    nextOrderItemId: maxId(orderItems, 1),
+    nextOrderNumber: orders.length + 1,
+  };
+}
+
+async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
+  const db = await getSqlDb();
+  await db.execute("DELETE FROM order_items");
+  await db.execute("DELETE FROM orders");
+  await db.execute("DELETE FROM service_prices");
+  await db.execute("DELETE FROM customers");
+  await db.execute("DELETE FROM coupons");
+  await db.execute("DELETE FROM customer_tags");
+  await db.execute("DELETE FROM products");
+
+  for (const t of data.customerTags ?? seedDefaultTags()) {
+    await db.execute(
+      "INSERT INTO customer_tags (id, slug, label, color) VALUES (?, ?, ?, ?)",
+      [t.id, t.slug, t.label, t.color]
+    );
+  }
+  for (const cp of data.coupons ?? []) {
+    await db.execute(
+      "INSERT INTO coupons (id, code, type, value, active, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [cp.id, cp.code, cp.type, cp.value, cp.active, cp.createdAt]
+    );
+  }
+  for (const p of data.products) {
+    await db.execute(
+      "INSERT INTO products (id, name, icon_name, base_price) VALUES (?, ?, ?, ?)",
+      [p.id, p.name, p.iconName, p.basePrice]
+    );
+  }
+  for (const c of data.customers) {
+    await db.execute(
+      `INSERT INTO customers (id, name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        c.id,
+        c.name,
+        c.phone,
+        c.notes ?? "",
+        c.address ?? "",
+        c.tagId ?? 1,
+        c.creditBalance ?? 0,
+        c.createdAt,
+        c.updatedAt,
+      ]
+    );
+  }
+  for (const sp of data.servicePrices) {
+    await db.execute(
+      "INSERT INTO service_prices (id, product_id, service_type, price) VALUES (?, ?, ?, ?)",
+      [sp.id, sp.productId, sp.serviceType, sp.price]
+    );
+  }
+  for (const o of data.orders) {
+    await db.execute(
+      `INSERT INTO orders (id, order_number, customer_id, customer_phone, subtotal_amount, discount_amount, total_amount, amount_paid, balance_due, payment_method, coupon_code, payment_status, order_status, delivery_date, priority, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        o.id,
+        o.orderNumber,
+        o.customerId,
+        o.customerPhone,
+        o.subtotalAmount ?? o.totalAmount,
+        o.discountAmount ?? 0,
+        o.totalAmount,
+        o.amountPaid ?? (o.paymentStatus === "paid" ? o.totalAmount : 0),
+        o.balanceDue ?? 0,
+        o.paymentMethod ?? "cash",
+        o.couponCode,
+        o.paymentStatus,
+        o.orderStatus,
+        o.deliveryDate,
+        o.priority ?? "normal",
+        o.createdAt,
+      ]
+    );
+  }
+  for (const i of data.orderItems) {
+    await db.execute(
+      "INSERT INTO order_items (id, order_id, product_id, service_type, subtotal) VALUES (?, ?, ?, ?, ?)",
+      [i.id, i.orderId, i.productId, i.serviceType, i.subtotal]
+    );
+  }
+}
+
+export async function exportDatabaseSnapshot(): Promise<DatabaseSnapshot> {
+  const data = isTauri() ? await buildLocalDbFromTauri() : loadLocalDb();
+  return {
+    version: 2,
+    updatedAt: new Date().toISOString(),
+    data,
+  };
+}
+
+export async function importDatabaseSnapshot(
+  snapshot: DatabaseSnapshot
+): Promise<void> {
+  const data = migrateLegacyDb(
+    snapshot.data as unknown as Record<string, unknown>
+  );
+  if (isTauri()) {
+    await applyLocalDbToTauri(data);
+    triggerSyncPush();
+    return;
+  }
+  saveLocalDb(data);
 }

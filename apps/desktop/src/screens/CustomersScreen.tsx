@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Search, Phone, MapPin, ChevronRight } from "lucide-react";
-import type { Customer } from "@/db/schema";
+import type { Customer, CustomerTag } from "@/db/schema";
 import type { CustomerListMeta } from "@/db/schema";
 import {
   getCustomers,
   createCustomer,
   deleteCustomer,
   getCustomerListMeta,
+  getCustomerTags,
   initDatabase,
 } from "@/db/client";
+import { CustomerTagBadge } from "@/components/CustomerTagBadge";
+import { WhatsAppButton } from "@/components/WhatsAppButton";
 import { formatCurrency } from "@/lib/utils";
+import {
+  buildDebtMessage,
+  buildOrderReadyMessage,
+  buildWhatsAppUrl,
+} from "@/lib/whatsapp";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +31,10 @@ import {
 } from "@/components/ui/dialog";
 
 export function CustomersScreen() {
+  const { user } = useAuth();
+  const shopName = user?.companyName ?? "Cicibyte CleanLedger";
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [tags, setTags] = useState<CustomerTag[]>([]);
   const [metaMap, setMetaMap] = useState<Record<number, CustomerListMeta>>({});
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -31,12 +43,19 @@ export function CustomersScreen() {
     phone: "",
     notes: "",
     address: "",
+    tagId: 1,
   });
+
+  const tagMap = Object.fromEntries(tags.map((t) => [t.id, t]));
 
   const load = useCallback(async () => {
     await initDatabase();
-    const list = await getCustomers();
+    const [list, tagList] = await Promise.all([
+      getCustomers(),
+      getCustomerTags(),
+    ]);
     setCustomers(list);
+    setTags(tagList);
     const metaEntries = await Promise.all(
       list.map(async (c) => [
         c.id,
@@ -61,7 +80,7 @@ export function CustomersScreen() {
     if (!form.name.trim() || !form.phone.trim()) return;
     await createCustomer(form);
     setDialogOpen(false);
-    setForm({ name: "", phone: "", notes: "", address: "" });
+    setForm({ name: "", phone: "", notes: "", address: "", tagId: 1 });
     await load();
   };
 
@@ -109,6 +128,7 @@ export function CustomersScreen() {
           <div className="mx-auto grid max-w-4xl gap-3">
             {filtered.map((c) => {
               const meta = metaMap[c.id];
+              const tag = tagMap[c.tagId];
               return (
               <Card key={c.id} className="transition hover:border-mint/40">
                 <CardContent className="flex items-center gap-4 p-4">
@@ -122,6 +142,20 @@ export function CustomersScreen() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="truncate text-lg font-semibold">{c.name}</p>
+                        <CustomerTagBadge tag={tag} />
+                        <WhatsAppButton
+                          href={buildWhatsAppUrl(
+                            c.phone,
+                            (meta?.creditDebt ?? c.creditBalance ?? 0) > 0
+                              ? buildDebtMessage(
+                                  c.name,
+                                  meta?.creditDebt ?? c.creditBalance ?? 0,
+                                  shopName
+                                )
+                              : buildOrderReadyMessage(c.name, shopName)
+                          )}
+                          title="Müşteriye WhatsApp mesajı gönder"
+                        />
                         {meta?.hasActiveOrders && (
                           <span className="rounded-lg bg-[#fff4e6] px-2 py-0.5 text-xs font-semibold text-[#c2410c]">
                             İçeride Ürünü Var
@@ -132,6 +166,11 @@ export function CustomersScreen() {
                       {meta && meta.pendingAmount > 0 && (
                         <p className="mt-1 text-xs font-semibold text-[#b45309]">
                           Bekleyen Tahsilat: {formatCurrency(meta.pendingAmount)}
+                        </p>
+                      )}
+                      {meta && meta.creditDebt > 0 && (
+                        <p className="mt-1 text-xs font-semibold text-red-600">
+                          Cari Borç: {formatCurrency(meta.creditDebt)}
                         </p>
                       )}
                       {c.address && (
@@ -181,6 +220,21 @@ export function CustomersScreen() {
                 placeholder="05XX XXX XX XX"
                 required
               />
+            </Field>
+            <Field label="Müşteri Tipi / Etiket">
+              <select
+                value={form.tagId}
+                onChange={(e) =>
+                  setForm({ ...form, tagId: Number(e.target.value) })
+                }
+                className="h-11 w-full rounded-xl border-2 border-input bg-card px-3 text-sm"
+              >
+                {tags.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="Açık Adres (Evden al / Eve teslim)">
               <textarea

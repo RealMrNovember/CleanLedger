@@ -23,6 +23,6 @@ export function GuestRoute() {
       </div>
     );
   }
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to="/dashboard/pos" replace />;
   return <Outlet />;
 }

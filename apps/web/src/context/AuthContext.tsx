@@ -14,6 +14,7 @@ import {
   login as apiLogin,
 } from "@/lib/auth-api";
 import { ensureLicense, getInstallationId } from "@/lib/license-client";
+import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -35,6 +36,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  useEffect(() => {
+    if (!session?.token) return;
+    void runSyncPull().then((changed) => {
+      if (changed) window.dispatchEvent(new Event("cleanledger-sync"));
+    });
+    return initSyncListeners(() => {
+      window.dispatchEvent(new Event("cleanledger-sync"));
+    });
+  }, [session?.token]);
+
   const signup = useCallback(async (input: SignupInput) => {
     const s = await apiSignup(input);
     try {
@@ -43,6 +54,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       /* trial may already exist — signup still succeeds */
     }
     setSession(s);
+    await runSyncPull();
+    void runSyncPush();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -53,6 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       /* keep login if license server unreachable */
     }
     setSession(s);
+    await runSyncPull();
+    void runSyncPush();
   }, []);
 
   const logout = useCallback(() => {

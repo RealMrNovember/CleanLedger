@@ -23,7 +23,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/dashboard", { replace: true });
+      navigate("/dashboard/pos", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Giriş başarısız.");
     } finally {

@@ -59,3 +59,20 @@
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   }
 }
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #cleanledger-receipt,
+  #cleanledger-receipt * {
+    visibility: visible !important;
+  }
+  #cleanledger-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    max-width: 100%;
+  }
+}

@@ -12,6 +12,24 @@
     "sql:allow-close",
     "updater:default",
     "process:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "fs:default",
+    {
+      "identifier": "fs:allow-read-recursive",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$RESOURCE/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-recursive",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPCACHE/**" }
+      ]
+    }
   ]
 }

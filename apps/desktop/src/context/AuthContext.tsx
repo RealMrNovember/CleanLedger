@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth-api";
 import { ensureLicense, isLicenseUsable } from "@/lib/license-client";
 import { getInstallationId } from "@/lib/installation";
+import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
 import {
   initDatabase,
   saveOrganizationSettings,
@@ -109,6 +110,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSession(saved);
           setOrganization(synced);
         }
+        if (saved?.token) {
+          await runSyncPull();
+          initSyncListeners(() => {
+            window.dispatchEvent(new Event("cleanledger-sync"));
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -122,6 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const org = await syncOrganization(next);
     setSession(next);
     setOrganization(org);
+    await runSyncPull();
+    void runSyncPush();
   }, []);
 
   const logout = useCallback(async () => {

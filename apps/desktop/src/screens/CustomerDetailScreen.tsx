@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Phone, MapPin, FileText, Pencil } from "lucide-react";
-import type { Customer, Order, OrderStatus, PaymentStatus } from "@/db/schema";
+import type { Customer, CustomerTag, Order, OrderStatus, PaymentStatus } from "@/db/schema";
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/db/schema";
 import {
   getCustomerById,
   getCustomerOrders,
+  getCustomerTags,
   updateCustomer,
   initDatabase,
 } from "@/db/client";
+import { CustomerTagBadge } from "@/components/CustomerTagBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +22,7 @@ export function CustomerDetailScreen() {
   const customerId = Number(id);
 
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [tags, setTags] = useState<CustomerTag[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -28,21 +31,27 @@ export function CustomerDetailScreen() {
     phone: "",
     notes: "",
     address: "",
+    tagId: 1,
   });
 
   const load = useCallback(async () => {
     await initDatabase();
-    const c = await getCustomerById(customerId);
+    const [c, tagList] = await Promise.all([
+      getCustomerById(customerId),
+      getCustomerTags(),
+    ]);
     if (!c) {
       navigate("/customers");
       return;
     }
     setCustomer(c);
+    setTags(tagList);
     setForm({
       name: c.name,
       phone: c.phone,
       notes: c.notes ?? "",
       address: c.address ?? "",
+      tagId: c.tagId ?? 1,
     });
     const summary = await getCustomerOrders(customerId);
     setOrders(summary.orders);
@@ -59,6 +68,8 @@ export function CustomerDetailScreen() {
     setCustomer(updated);
     setEditing(false);
   };
+
+  const tag = tags.find((t) => t.id === customer?.tagId);
 
   if (!customer) {
     return (
@@ -77,8 +88,16 @@ export function CustomerDetailScreen() {
           </Link>
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">{customer.name}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold">{customer.name}</h1>
+            <CustomerTagBadge tag={tag} />
+          </div>
           <p className="text-sm text-muted-foreground">{customer.phone}</p>
+          {customer.creditBalance > 0 && (
+            <p className="mt-1 text-sm font-semibold text-red-600">
+              Cari Borç: {formatCurrency(customer.creditBalance)}
+            </p>
+          )}
         </div>
         <Button variant="outline" onClick={() => setEditing(!editing)} className="gap-2">
           <Pencil className="size-4" />
@@ -104,6 +123,19 @@ export function CustomerDetailScreen() {
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   placeholder="Telefon"
                 />
+                <select
+                  value={form.tagId}
+                  onChange={(e) =>
+                    setForm({ ...form, tagId: Number(e.target.value) })
+                  }
+                  className="h-11 w-full rounded-xl border-2 border-input px-3 text-sm"
+                >
+                  {tags.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
                 <textarea
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
@@ -130,6 +162,11 @@ export function CustomerDetailScreen() {
                   icon={FileText}
                   label="Notlar"
                   value={customer.notes || "—"}
+                />
+                <InfoRow
+                  icon={FileText}
+                  label="Etiket"
+                  value={tag?.label ?? "Normal"}
                 />
               </>
             )}
@@ -171,6 +208,8 @@ export function CustomerDetailScreen() {
                         {new Date(o.createdAt).toLocaleDateString("tr-TR")} ·{" "}
                         {ORDER_STATUS_LABELS[o.orderStatus as OrderStatus]} ·{" "}
                         {PAYMENT_STATUS_LABELS[o.paymentStatus as PaymentStatus]}
+                        {o.balanceDue > 0 &&
+                          ` · Cari: ${formatCurrency(o.balanceDue)}`}
                       </p>
                     </div>
                     <p className="font-bold">{formatCurrency(o.totalAmount)}</p>

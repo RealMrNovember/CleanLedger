@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@tauri-apps/plugin-sql": path.resolve(__dirname, "./src/db/tauri-stub.ts"),
     },
   },
   build: {
