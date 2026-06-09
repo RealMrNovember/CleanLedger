@@ -1,6 +1,6 @@
 [package]
 name = "cleanledger-desktop"
-version = "1.0.4"
+version = "1.0.5"
 description = "CleanLedger — Kuru Temizleme Yönetim Sistemi"
 authors = ["Cicibyte Corp."]
 edition = "2021"

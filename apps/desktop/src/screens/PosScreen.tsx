@@ -21,7 +21,6 @@ import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import { useCatalog } from "@/hooks/useCatalog";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
 import { CustomerPanel } from "@/components/pos/CustomerPanel";
-import { CustomerPickerDialog } from "@/components/pos/CustomerPickerDialog";
 import { ProductCatalog } from "@/components/pos/ProductCatalog";
 import { CartPanel, type CartLine } from "@/components/pos/CartPanel";
 import { PosPaymentDialog } from "@/components/pos/PosPaymentDialog";
@@ -40,6 +39,7 @@ export function PosScreen() {
   const [phone, setPhone] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [customerId, setCustomerId] = useState<number | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
   const [creditDebt, setCreditDebt] = useState(0);
   const [deliveryDate, setDeliveryDate] = useState(() =>
@@ -55,7 +55,6 @@ export function PosScreen() {
   const [savedOrder, setSavedOrder] = useState<Order | null>(null);
   const [savedReceipt, setSavedReceipt] = useState<ReceiptData | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -66,10 +65,12 @@ export function PosScreen() {
         if (c) {
           setFirstName(c.name);
           setLastName(c.lastName ?? "");
+          setCustomerId(c.id);
           setIsRegistered(true);
         } else {
           setFirstName("");
           setLastName("");
+          setCustomerId(null);
           setIsRegistered(false);
         }
         const debt = await getCustomerCreditDebt(trimmed);
@@ -77,6 +78,7 @@ export function PosScreen() {
       } else {
         setFirstName("");
         setLastName("");
+        setCustomerId(null);
         setIsRegistered(false);
         setCreditDebt(0);
       }
@@ -153,6 +155,7 @@ export function PosScreen() {
     setPhone(customer.phone);
     setFirstName(customer.name);
     setLastName(customer.lastName ?? "");
+    setCustomerId(customer.id);
     setIsRegistered(true);
     const debt = await getCustomerCreditDebt(customer.phone);
     setCreditDebt(debt);
@@ -244,6 +247,7 @@ export function PosScreen() {
     setPhone("");
     setFirstName("");
     setLastName("");
+    setCustomerId(null);
     setIsRegistered(false);
     setCreditDebt(0);
     setDeliveryDate(toDateKey(addDaysToDate(new Date(), 3)));
@@ -269,12 +273,7 @@ export function PosScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
-      <CustomerPickerDialog
-        open={customerPickerOpen}
-        onOpenChange={setCustomerPickerOpen}
-        onSelect={(c) => void handlePickCustomer(c)}
-      />
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <PosPaymentDialog
         open={paymentDialogOpen}
         onOpenChange={setPaymentDialogOpen}
@@ -295,11 +294,12 @@ export function PosScreen() {
               firstName={firstName}
               lastName={lastName}
               isRegistered={isRegistered}
+              customerId={customerId}
               creditDebt={creditDebt}
               onPhoneChange={setPhone}
               onFirstNameChange={setFirstName}
               onLastNameChange={setLastName}
-              onPickCustomer={() => setCustomerPickerOpen(true)}
+              onSelectCustomer={handlePickCustomer}
               deliveryDate={deliveryDate}
               onDeliveryDateChange={setDeliveryDate}
               priority={priority}

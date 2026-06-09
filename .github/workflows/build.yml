@@ -47,7 +47,7 @@ jobs:
           VITE_LICENSE_API_URL: https://license.cicibyte.com
           VITE_LICENSE_APP_CODE: cleanledger
           VITE_LICENSE_API_KEY: Cicibyte_X92kLpQ84mNz_2026!
-        run: npm run tauri build
+        run: npm run tauri build -- --no-sign
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
