@@ -12,6 +12,8 @@ import {
   clearSession,
   signup as apiSignup,
   login as apiLogin,
+  changePassword as apiChangePassword,
+  type ChangePasswordInput,
 } from "@/lib/auth-api";
 import { ensureLicense, getInstallationId } from "@/lib/license-client";
 import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
@@ -22,6 +24,7 @@ interface AuthContextValue {
   loading: boolean;
   signup: (input: SignupInput) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  changePassword: (input: ChangePasswordInput) => Promise<void>;
   logout: () => void;
 }
 
@@ -70,6 +73,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void runSyncPush();
   }, []);
 
+  const changePassword = useCallback(
+    async (input: ChangePasswordInput) => {
+      const current = session ?? getSession();
+      if (!current?.token || !current.user?.email) {
+        throw new Error("Oturum bulunamadı. Lütfen tekrar giriş yapın.");
+      }
+      const s = await apiChangePassword(
+        current.token,
+        current.user.email,
+        input
+      );
+      setSession(s);
+    },
+    [session]
+  );
+
   const logout = useCallback(() => {
     clearSession();
     setSession(null);
@@ -83,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         signup,
         login,
+        changePassword,
         logout,
       }}
     >
