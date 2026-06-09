@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import type { ServiceType } from "@/db/schema";
 import { SERVICE_LABELS, SERVICE_TYPES } from "@/db/schema";
-import { PRODUCT_ICON_OPTIONS } from "@/lib/product-icons";
+import { IconGalleryPicker } from "@/components/settings/IconGalleryPicker";
 import { createProduct, updateServicePrice } from "@/db/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 
 interface AddProductDialogProps {
   open: boolean;
@@ -144,28 +143,9 @@ export function AddProductDialog({
 
           <div>
             <label className="mb-3 block text-sm font-medium">
-              İkon Galerisi — POS&apos;ta görünecek simge
+              Özel Ürün Kategorisi — İkon Seçin
             </label>
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6">
-              {PRODUCT_ICON_OPTIONS.map(({ id, label, Icon }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setIconName(id)}
-                  className={cn(
-                    "flex flex-col items-center gap-1.5 rounded-xl border-2 p-2.5 text-[10px] transition sm:text-xs",
-                    iconName === id
-                      ? "border-mint bg-mint-light text-[#0f3d3a] shadow-sm ring-2 ring-mint/30"
-                      : "border-border bg-background hover:border-mint/40 hover:bg-muted/30"
-                  )}
-                >
-                  <Icon className="size-7 sm:size-8" />
-                  <span className="line-clamp-2 text-center leading-tight">
-                    {label}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <IconGalleryPicker value={iconName} onChange={setIconName} />
           </div>
 
           <Button type="submit" className="w-full" size="lg" disabled={saving}>

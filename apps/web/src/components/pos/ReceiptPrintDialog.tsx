@@ -79,10 +79,11 @@ export function ReceiptPrintDialog({
         <div
           ref={printRef}
           id="cleanledger-receipt"
-          className="mx-auto w-full max-w-[320px] rounded-lg border border-dashed border-border bg-white p-5 font-mono text-sm text-black shadow-inner print:border-none print:shadow-none"
+          className="receipt-preview mx-auto w-[300px] max-w-full rounded-lg border border-dashed border-border bg-white p-4 text-black shadow-inner print:border-none print:shadow-none"
+          style={{ fontFamily: '"Segoe UI", system-ui, sans-serif' }}
         >
-          <div className="border-b border-black/20 pb-3 text-center">
-            <div className="mb-3 flex justify-center print:[&_*]:text-black">
+          <div className="border-b border-black/15 pb-3 text-center">
+            <div className="receipt-logo-wrap mb-3 flex justify-center">
               <Logo size="sm" showText className="flex-col items-center gap-1" />
             </div>
             <p className="text-base font-bold uppercase tracking-wide">

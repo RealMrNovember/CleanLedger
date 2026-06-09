@@ -13,7 +13,7 @@ import {
 } from "@/db/client";
 import { CustomerTagBadge } from "@/components/CustomerTagBadge";
 import { WhatsAppButton } from "@/components/WhatsAppButton";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCustomerName } from "@/lib/utils";
 import {
   buildDebtMessage,
   buildOrderReadyMessage,
@@ -40,6 +40,7 @@ export function CustomersScreen() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({
     name: "",
+    lastName: "",
     phone: "",
     notes: "",
     address: "",
@@ -69,23 +70,22 @@ export function CustomersScreen() {
     load();
   }, [load]);
 
-  const filtered = customers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.phone.includes(search)
-  );
+  const filtered = customers.filter((c) => {
+    const full = formatCustomerName(c).toLowerCase();
+    return full.includes(search.toLowerCase()) || c.phone.includes(search);
+  });
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.phone.trim()) return;
     await createCustomer(form);
     setDialogOpen(false);
-    setForm({ name: "", phone: "", notes: "", address: "", tagId: 1 });
+    setForm({ name: "", lastName: "", phone: "", notes: "", address: "", tagId: 1 });
     await load();
   };
 
-  const handleDelete = async (id: number, name: string) => {
-    if (!confirm(`${name} müşterisini silmek istediğinize emin misiniz?`)) return;
+  const handleDelete = async (id: number, displayName: string) => {
+    if (!confirm(`${displayName} müşterisini silmek istediğinize emin misiniz?`)) return;
     await deleteCustomer(id);
     await load();
   };
@@ -141,18 +141,20 @@ export function CustomersScreen() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-lg font-semibold">{c.name}</p>
+                        <p className="truncate text-lg font-semibold">
+                          {formatCustomerName(c)}
+                        </p>
                         <CustomerTagBadge tag={tag} />
                         <WhatsAppButton
                           href={buildWhatsAppUrl(
                             c.phone,
                             (meta?.creditDebt ?? c.creditBalance ?? 0) > 0
                               ? buildDebtMessage(
-                                  c.name,
+                                  formatCustomerName(c),
                                   meta?.creditDebt ?? c.creditBalance ?? 0,
                                   shopName
                                 )
-                              : buildOrderReadyMessage(c.name, shopName)
+                              : buildOrderReadyMessage(formatCustomerName(c), shopName)
                           )}
                           title="Müşteriye WhatsApp mesajı gönder"
                         />
@@ -186,7 +188,7 @@ export function CustomersScreen() {
                     variant="ghost"
                     size="sm"
                     className="text-destructive"
-                    onClick={() => void handleDelete(c.id, c.name)}
+                    onClick={() => void handleDelete(c.id, formatCustomerName(c))}
                   >
                     Sil
                   </Button>
@@ -204,12 +206,19 @@ export function CustomersScreen() {
             <DialogTitle>Yeni Müşteri Ekle</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
-            <Field label="Müşteri Adı" required>
+            <Field label="Ad" required>
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Ad Soyad"
+                placeholder="Ad"
                 required
+              />
+            </Field>
+            <Field label="Soyad">
+              <Input
+                value={form.lastName}
+                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                placeholder="Soyad (opsiyonel)"
               />
             </Field>
             <Field label="Telefon" required>

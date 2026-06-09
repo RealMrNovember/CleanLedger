@@ -1,4 +1,4 @@
-import { Phone, CalendarDays, Zap, AlertTriangle } from "lucide-react";
+import { Phone, CalendarDays, Zap, AlertTriangle, User } from "lucide-react";
 import type { OrderPriority } from "@/db/schema";
 import { ORDER_PRIORITY_LABELS } from "@/db/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,9 +9,13 @@ import { toDateKey, addDaysToDate } from "@/lib/dates";
 
 interface CustomerPanelProps {
   phone: string;
-  customerName?: string;
+  firstName: string;
+  lastName: string;
+  isRegistered: boolean;
   creditDebt?: number;
   onPhoneChange: (value: string) => void;
+  onFirstNameChange: (value: string) => void;
+  onLastNameChange: (value: string) => void;
   deliveryDate: string;
   onDeliveryDateChange: (value: string) => void;
   priority: OrderPriority;
@@ -20,9 +24,13 @@ interface CustomerPanelProps {
 
 export function CustomerPanel({
   phone,
-  customerName,
+  firstName,
+  lastName,
+  isRegistered,
   creditDebt = 0,
   onPhoneChange,
+  onFirstNameChange,
+  onLastNameChange,
   deliveryDate,
   onDeliveryDateChange,
   priority,
@@ -31,6 +39,7 @@ export function CustomerPanel({
   const today = toDateKey(new Date());
   const tomorrow = toDateKey(addDaysToDate(new Date(), 1));
   const dayAfter = toDateKey(addDaysToDate(new Date(), 3));
+  const showNameFields = phone.trim().length >= 10;
 
   return (
     <Card className="h-full border-border/50 bg-card/80 shadow-none">
@@ -66,10 +75,42 @@ export function CustomerPanel({
             className="h-14 text-xl font-medium tracking-wide"
             autoFocus
           />
-          {customerName && (
-            <p className="mt-2 text-lg font-semibold text-trust">{customerName}</p>
-          )}
         </div>
+
+        {showNameFields && (
+          <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <User className="size-4 text-trust" />
+              {isRegistered ? "Müşteri Bilgisi" : "Yeni Müşteri Kaydı"}
+            </label>
+            <div>
+              <label className="mb-1 block text-xs font-medium">
+                Ad <span className="text-destructive">*</span>
+              </label>
+              <Input
+                value={firstName}
+                onChange={(e) => onFirstNameChange(e.target.value)}
+                placeholder="Ad"
+                className="h-11"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium">Soyad</label>
+              <Input
+                value={lastName}
+                onChange={(e) => onLastNameChange(e.target.value)}
+                placeholder="Soyad (opsiyonel)"
+                className="h-11"
+              />
+            </div>
+            {isRegistered && firstName && (
+              <p className="text-xs text-mint">
+                Kayıtlı müşteri — bilgileri güncelleyebilirsiniz.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="space-y-2">
           <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">

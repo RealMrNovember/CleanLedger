@@ -15,22 +15,30 @@ function isTauri(): boolean {
 
 export function UpdateChecker() {
   const [open, setOpen] = useState(false);
-  const [version, setVersion] = useState("");
+  const [currentVersion, setCurrentVersion] = useState("");
+  const [newVersion, setNewVersion] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     if (!isTauri()) return;
 
     void (async () => {
       try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const current = await getVersion();
+        setCurrentVersion(current);
+
         const { check } = await import("@tauri-apps/plugin-updater");
         const update = await check();
         if (update) {
-          setVersion(update.version);
+          setNewVersion(update.version);
           setOpen(true);
         }
       } catch (err) {
         console.debug("Updater check skipped:", err);
+      } finally {
+        setChecked(true);
       }
     })();
   }, []);
@@ -54,6 +62,8 @@ export function UpdateChecker() {
     }
   };
 
+  if (!isTauri() || !checked) return null;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="sm:max-w-md">
@@ -62,11 +72,23 @@ export function UpdateChecker() {
             <Sparkles className="size-7 text-mint" />
           </div>
           <DialogTitle className="text-center text-xl">
-            Yeni Sürüm Mevcut
+            Yeni Güncelleme Mevcut
           </DialogTitle>
           <DialogDescription className="text-center">
-            CleanLedger {version} hazır. Tek tıkla yükleyin — kurulum arka planda
-            sessizce tamamlanır ve uygulama yeniden başlar.
+            {currentVersion && newVersion ? (
+              <>
+                Mevcut sürüm: <strong>{currentVersion}</strong>
+                <br />
+                Yeni sürüm: <strong>{newVersion}</strong>
+                <br />
+                <span className="mt-2 inline-block">
+                  Tek tıkla yükleyin — kurulum tamamlandığında uygulama yeniden
+                  başlar.
+                </span>
+              </>
+            ) : (
+              <>CleanLedger güncellemesi hazır. Tek tıkla yükleyebilirsiniz.</>
+            )}
           </DialogDescription>
         </DialogHeader>
         <Button

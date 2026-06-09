@@ -28,6 +28,8 @@
   --color-trust: #45b7d1;
   --color-trust-light: #e6f6fa;
   --color-warm: #ffb347;
+  --color-surface: #f8fafb;
+  --color-ink: #1e293b;
 }
 
 :root {
@@ -51,6 +53,9 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
   * {
     @apply border-border outline-ring/50;
   }
@@ -60,19 +65,58 @@
   }
 }
 
+.field-input {
+  height: 3rem;
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 2px solid #e2e8f0;
+  background: var(--color-surface);
+  padding-left: 3rem;
+  padding-right: 1rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field-input:focus {
+  border-color: #4ecdc4;
+  box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.2);
+}
+
 @media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+
   body * {
     visibility: hidden !important;
   }
+
   #cleanledger-receipt,
   #cleanledger-receipt * {
     visibility: visible !important;
   }
+
   #cleanledger-receipt {
     position: absolute;
     left: 0;
     top: 0;
-    width: 80mm;
-    max-width: 100%;
+    width: 300px;
+    max-width: 80mm;
+    margin: 0 auto;
+    padding: 8px 10px !important;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif !important;
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+    color: #000 !important;
+    background: #fff !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  #cleanledger-receipt .receipt-logo-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 8px;
   }
 }

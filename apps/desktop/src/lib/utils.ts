@@ -28,3 +28,13 @@ export function addDays(date: Date, days: number): Date {
   result.setDate(result.getDate() + days);
   return result;
 }
+
+/** Müşteri ad + soyad birleşimi */
+export function formatCustomerName(customer: {
+  name: string;
+  lastName?: string | null;
+}): string {
+  return [customer.name?.trim(), customer.lastName?.trim()]
+    .filter(Boolean)
+    .join(" ");
+}
