@@ -148,7 +148,7 @@ export function OrdersTrackingScreen() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <AddPaymentDialog
         open={paymentDialogOpen}
         onOpenChange={setPaymentDialogOpen}

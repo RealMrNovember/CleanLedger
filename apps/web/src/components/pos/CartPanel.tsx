@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2, ShoppingBag, Tag, Plus, Wallet } from "lucide-react";
+import { Trash2, ShoppingBag, Tag, Plus, Wallet, ChevronDown, ChevronUp } from "lucide-react";
 import type { Product, ServiceType } from "@/db/schema";
 import { SERVICE_LABELS } from "@/db/schema";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,8 @@ interface CartPanelProps {
   onCouponCodeChange: (code: string) => void;
   onApplyCoupon: () => void;
   onPay: () => void;
+  /** Mobilde sticky bar kullanıldığında alt ödeme alanını gizle */
+  hideMobileCheckout?: boolean;
 }
 
 export function CartPanel({
@@ -48,13 +50,14 @@ export function CartPanel({
   onCouponCodeChange,
   onApplyCoupon,
   onPay,
+  hideMobileCheckout = false,
 }: CartPanelProps) {
   const [couponOpen, setCouponOpen] = useState(false);
 
   return (
-    <Card className="flex h-full w-full flex-col border-border/50 bg-card/80 shadow-none">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground/80">
+    <Card className="flex h-full w-full flex-col border-border/50 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
+      <CardHeader className="pb-2 sm:pb-3">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-gray-100">
           <ShoppingBag className="size-5 text-trust" />
           Adisyon
           {items.length > 0 && (
@@ -65,15 +68,15 @@ export function CartPanel({
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="flex flex-1 flex-col gap-3 overflow-hidden p-4 pt-0 sm:p-5">
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3 pt-0 sm:gap-3 sm:p-5">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 sm:space-y-3">
           {items.length === 0 ? (
-            <div className="flex h-full min-h-[160px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 p-6 text-center">
-              <ShoppingBag className="mb-3 size-10 text-muted-foreground/40" />
-              <p className="font-medium text-muted-foreground">
+            <div className="flex h-full min-h-[120px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 p-4 text-center sm:min-h-[160px] sm:p-6">
+              <ShoppingBag className="mb-2 size-8 text-muted-foreground/40 sm:mb-3 sm:size-10" />
+              <p className="text-sm font-medium text-muted-foreground sm:text-base">
                 Henüz ürün eklenmedi
               </p>
-              <p className="mt-1 text-sm text-muted-foreground/70">
+              <p className="mt-1 text-xs text-muted-foreground/70 sm:text-sm">
                 Katalogdan ürün seçin
               </p>
             </div>
@@ -83,35 +86,37 @@ export function CartPanel({
               return (
                 <div
                   key={line.key}
-                  className="rounded-2xl border border-border/60 bg-background/60 p-4"
+                  className="rounded-xl border border-border/60 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-800/60 sm:rounded-2xl sm:p-4"
                 >
-                  <div className="mb-3 flex items-start gap-3">
-                    <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-mint-light text-mint">
-                      <Icon className="size-5" />
+                  <div className="mb-2 flex items-start gap-2 sm:mb-3 sm:gap-3">
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-mint-light text-mint sm:size-11 sm:rounded-xl">
+                      <Icon className="size-4 sm:size-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold">{line.product.name}</p>
-                      <p className="text-lg font-bold text-trust">
+                      <p className="text-sm font-semibold sm:text-base">
+                        {line.product.name}
+                      </p>
+                      <p className="text-base font-bold text-trust sm:text-lg">
                         {formatCurrency(line.subtotal)}
                       </p>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      className="size-8 shrink-0 text-muted-foreground hover:text-destructive sm:size-9"
                       onClick={() => onRemove(line.key)}
                     >
                       <Trash2 className="size-4" />
                     </Button>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
                     {SERVICE_OPTIONS.map((svc) => (
                       <button
                         key={svc}
                         type="button"
                         onClick={() => onServiceChange(line.key, svc)}
                         className={cn(
-                          "rounded-xl px-3 py-2 text-xs font-medium transition-all",
+                          "rounded-lg px-2 py-1.5 text-[10px] font-medium transition-all sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs",
                           line.serviceType === svc
                             ? "bg-mint text-primary-foreground shadow-sm"
                             : "bg-muted text-muted-foreground hover:bg-muted/80"
@@ -127,30 +132,28 @@ export function CartPanel({
           )}
         </div>
 
-        <div className="mt-auto shrink-0 space-y-3 border-t border-border/60 pt-3">
-          {!couponOpen ? (
-            <button
-              type="button"
-              onClick={() => setCouponOpen(true)}
-              className="flex w-full items-center gap-2 rounded-xl border border-dashed border-border/60 px-3 py-2 text-sm font-medium text-muted-foreground transition hover:border-mint/40 hover:text-foreground"
-            >
+        <div className="mt-auto shrink-0 space-y-2 border-t border-border/60 pt-2 sm:space-y-3 sm:pt-3">
+          <button
+            type="button"
+            onClick={() => setCouponOpen((v) => !v)}
+            className="flex w-full items-center justify-between rounded-xl border border-dashed border-border/60 px-3 py-2 text-sm font-medium text-muted-foreground transition hover:border-mint/40 hover:text-foreground"
+          >
+            <span className="flex items-center gap-2">
               <Plus className="size-4" />
-              Kupon Ekle
-            </button>
-          ) : (
-            <div className="space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-sm font-medium">
-                  <Tag className="size-4" />
-                  Kupon
-                </span>
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => setCouponOpen(false)}
-                >
-                  Kapat
-                </button>
+              Kupon Ekle +
+            </span>
+            {couponOpen ? (
+              <ChevronUp className="size-4" />
+            ) : (
+              <ChevronDown className="size-4" />
+            )}
+          </button>
+
+          {couponOpen && (
+            <div className="space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3 dark:bg-slate-800/50">
+              <div className="flex items-center gap-1 text-sm font-medium">
+                <Tag className="size-4" />
+                Kupon Kodu
               </div>
               <div className="flex gap-2">
                 <Input
@@ -177,42 +180,42 @@ export function CartPanel({
             </div>
           )}
 
-          {(discountAmount > 0 || items.length > 0) && (
+          {discountAmount > 0 && (
             <div className="space-y-1 text-sm">
-              {discountAmount > 0 && (
-                <>
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Ara Toplam</span>
-                    <span>{formatCurrency(subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-mint">
-                    <span>İndirim</span>
-                    <span>-{formatCurrency(discountAmount)}</span>
-                  </div>
-                </>
-              )}
+              <div className="flex justify-between text-muted-foreground">
+                <span>Ara Toplam</span>
+                <span>{formatCurrency(subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-mint">
+                <span>İndirim</span>
+                <span>-{formatCurrency(discountAmount)}</span>
+              </div>
             </div>
           )}
 
-          <div className="rounded-2xl bg-trust-light/60 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-trust">
-              Toplam Tutar
-            </p>
-            <p className="text-3xl font-bold tracking-tight text-foreground">
-              {formatCurrency(total)}
-            </p>
-          </div>
-
-          <Button
-            variant="accent"
-            size="xl"
-            className="w-full gap-3 text-lg"
-            disabled={items.length === 0}
-            onClick={onPay}
+          <div
+            className={cn(
+              "space-y-3",
+              hideMobileCheckout && "hidden md:block"
+            )}
           >
-            <Wallet className="size-6" />
-            Öde
-          </Button>
+            <div className="hidden items-end justify-end md:flex">
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                Toplam: {formatCurrency(total)}
+              </p>
+            </div>
+
+            <Button
+              variant="accent"
+              size="xl"
+              className="w-full gap-3 text-lg"
+              disabled={items.length === 0}
+              onClick={onPay}
+            >
+              <Wallet className="size-6" />
+              Öde
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
