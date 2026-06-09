@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+apps/desktop/dist/
+apps/web/dist/
+
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# IDE & OS
+.DS_Store
+*.local
+.idea/
+.vscode/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# aaPanel / server (not part of repo)
+502.html
+404.html
+.user.ini
+.well-known/
+/index.html

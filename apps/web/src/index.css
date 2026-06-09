@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-mint: #4ecdc4;
+  --color-mint-light: #e8f8f6;
+  --color-trust: #45b7d1;
+  --color-trust-light: #e6f6fa;
+  --color-surface: #f8fafb;
+  --color-ink: #1e293b;
+  --color-muted: #64748b;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    @apply bg-surface text-ink antialiased;
+  }
+}
