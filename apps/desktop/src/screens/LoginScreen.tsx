@@ -1,12 +1,15 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Loader2, ExternalLink } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { useAuth } from "@/context/AuthContext";
+import { appConfig } from "@/lib/config";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export function LoginScreen() {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -22,6 +25,7 @@ export function LoginScreen() {
     setSubmitting(true);
     try {
       await login(email, password);
+      navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Giriş başarısız.");
     } finally {
@@ -30,26 +34,26 @@ export function LoginScreen() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0f1419]">
+    <div className="login-screen relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0f14]">
       <div
-        className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-30 blur-2xl"
+        className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-40 blur-2xl"
         style={{
           backgroundImage:
             "linear-gradient(135deg, #0f3d3a 0%, #1a5c56 35%, #2d6a4f 60%, #40916c 100%)",
         }}
       />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.08),transparent_60%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.12),transparent_65%)]" />
 
       <div className="relative z-10 w-full max-w-md px-6">
         <div className="mb-8 flex flex-col items-center gap-4">
-          <div className="rounded-2xl bg-white/95 p-4 shadow-xl backdrop-blur-sm">
+          <div className="rounded-2xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md">
             <Logo size="lg" />
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-semibold tracking-tight text-white">
               CleanLedger
             </h1>
-            <p className="mt-1 text-sm text-white/60">
+            <p className="mt-1 text-sm text-slate-100">
               Kuru temizleme yönetim sisteminize giriş yapın
             </p>
           </div>
@@ -57,11 +61,11 @@ export function LoginScreen() {
 
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          className="rounded-3xl border border-white/10 bg-white/95 p-8 shadow-2xl backdrop-blur-xl"
+          className="rounded-3xl border border-white/20 bg-white/10 p-8 shadow-2xl backdrop-blur-xl"
           noValidate
         >
           {error && (
-            <p className="mb-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">
+            <p className="mb-4 rounded-xl border border-red-400/40 bg-red-950/60 px-3 py-2 text-sm font-medium text-red-100">
               {error}
             </p>
           )}
@@ -73,7 +77,7 @@ export function LoginScreen() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="ornek@firma.com"
-                className="h-12 border-slate-200 bg-surface pl-11 text-base"
+                className="h-12 border-white/30 bg-white/15 pl-11 text-base text-white placeholder:text-slate-400 focus-visible:border-mint focus-visible:ring-mint/40"
                 autoFocus
               />
             </Field>
@@ -84,7 +88,7 @@ export function LoginScreen() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="h-12 border-slate-200 bg-surface pl-11 text-base"
+                className="h-12 border-white/30 bg-white/15 pl-11 text-base text-white placeholder:text-slate-400 focus-visible:border-mint focus-visible:ring-mint/40"
               />
             </Field>
 
@@ -98,13 +102,13 @@ export function LoginScreen() {
             </Button>
           </div>
 
-          <p className="mt-6 text-center text-xs text-muted-foreground">
+          <p className="mt-6 text-center text-xs text-slate-200">
             Hesabınız yok mu?{" "}
             <a
-              href="https://cleanledger.cicibyte.com/#/signup"
+              href={`${appConfig.webAppUrl}/#/signup`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-semibold text-trust hover:underline"
+              className="inline-flex items-center gap-1 font-semibold text-[#7dd3fc] hover:text-white hover:underline"
             >
               Web sitesinden kayıt olun
               <ExternalLink className="size-3" />
@@ -112,7 +116,7 @@ export function LoginScreen() {
           </p>
         </form>
 
-        <p className="mt-6 text-center text-xs text-white/40">
+        <p className="mt-6 text-center text-xs text-slate-300">
           Cicibyte Corp · Quiet Luxury Edition
         </p>
       </div>
@@ -131,11 +135,11 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-2 block text-sm font-medium text-foreground/80">
+      <label className="mb-2 block text-sm font-medium text-slate-100">
         {label}
       </label>
       <div className="relative">
-        <Icon className="absolute left-4 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Icon className="absolute left-4 top-1/2 z-10 size-4 -translate-y-1/2 text-slate-300" />
         {children}
       </div>
     </div>

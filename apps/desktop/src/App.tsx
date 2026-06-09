@@ -2,7 +2,11 @@ import { HashRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import { SyncProvider } from "@/context/SyncContext";
 import { CatalogProvider } from "@/hooks/useCatalog";
-import { ProtectedRoute, GuestRoute } from "@/components/auth/AuthGuard";
+import {
+  ProtectedRoute,
+  GuestRoute,
+  RootRedirect,
+} from "@/components/auth/AuthGuard";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginScreen } from "@/screens/LoginScreen";
 import { PosScreen } from "@/screens/PosScreen";
@@ -26,10 +30,14 @@ export default function App() {
                   <Route path="/" element={<PosScreen />} />
                   <Route path="/orders" element={<OrdersTrackingScreen />} />
                   <Route path="/customers" element={<CustomersScreen />} />
-                  <Route path="/customers/:id" element={<CustomerDetailScreen />} />
+                  <Route
+                    path="/customers/:id"
+                    element={<CustomerDetailScreen />}
+                  />
                   <Route path="/settings" element={<SettingsScreen />} />
                 </Route>
               </Route>
+              <Route path="*" element={<RootRedirect />} />
             </Routes>
           </HashRouter>
         </CatalogProvider>

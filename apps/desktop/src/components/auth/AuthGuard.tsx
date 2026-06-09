@@ -1,32 +1,36 @@
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
+function AuthLoadingScreen() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-[#0a0f14]">
+      <div className="size-10 animate-spin rounded-full border-4 border-white/20 border-t-mint" />
+    </div>
+  );
+}
+
 export function ProtectedRoute() {
-  const { user, loading } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
-  if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="size-10 animate-spin rounded-full border-4 border-mint/30 border-t-mint" />
-      </div>
-    );
+  if (loading) return <AuthLoadingScreen />;
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
-
-  if (!user) return <Navigate to="/login" replace />;
   return <Outlet />;
 }
 
 export function GuestRoute() {
-  const { user, loading } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="size-10 animate-spin rounded-full border-4 border-mint/30 border-t-mint" />
-      </div>
-    );
-  }
-
-  if (user) return <Navigate to="/" replace />;
+  if (loading) return <AuthLoadingScreen />;
+  if (isAuthenticated) return <Navigate to="/" replace />;
   return <Outlet />;
+}
+
+export function RootRedirect() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) return <AuthLoadingScreen />;
+  return <Navigate to={isAuthenticated ? "/" : "/login"} replace />;
 }
