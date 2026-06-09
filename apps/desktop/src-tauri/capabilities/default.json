@@ -12,7 +12,6 @@
     "sql:allow-close",
     "updater:default",
     "process:default",
-    "process:allow-restart",
-    "process:allow-relaunch"
+    "process:allow-restart"
   ]
 }
