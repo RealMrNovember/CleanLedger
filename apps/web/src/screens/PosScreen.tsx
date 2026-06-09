@@ -25,6 +25,7 @@ import { CustomerPickerDialog } from "@/components/pos/CustomerPickerDialog";
 import { ProductCatalog } from "@/components/pos/ProductCatalog";
 import { CartPanel, type CartLine } from "@/components/pos/CartPanel";
 import { PosPaymentDialog } from "@/components/pos/PosPaymentDialog";
+import { PosStickyBar } from "@/components/pos/PosStickyBar";
 import { OrderSuccessDialog } from "@/components/pos/OrderSuccessDialog";
 import { PosHeader } from "@/components/pos/PosHeader";
 import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
@@ -180,10 +181,10 @@ export function PosScreen() {
         const fullName = customer
           ? formatCustomerName(customer)
           : [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
-      const paid = Math.min(Math.max(0, amountPaid), total);
-      const shop = getShopProfile();
-      const shopContact = shopProfileToContact(shop);
-      const { order } = await createOrder({
+        const paid = Math.min(Math.max(0, amountPaid), total);
+        const shop = getShopProfile();
+        const shopContact = shopProfileToContact(shop);
+        const { order } = await createOrder({
           customerPhone: trimmedPhone,
           customerId: customer?.id ?? null,
           amountPaid: paid,
@@ -258,7 +259,7 @@ export function PosScreen() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex h-full items-center justify-center bg-white dark:bg-slate-900">
         <div className="text-center">
           <div className="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-mint/30 border-t-mint" />
           <p className="text-muted-foreground">Yükleniyor...</p>
@@ -268,7 +269,7 @@ export function PosScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <CustomerPickerDialog
         open={customerPickerOpen}
         onOpenChange={setCustomerPickerOpen}
@@ -288,8 +289,8 @@ export function PosScreen() {
 
       <PosHeader orderCount={cart.length} />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4 lg:grid lg:grid-cols-[minmax(240px,280px)_1fr_minmax(280px,340px)]">
-        <section className="w-full shrink-0 lg:min-h-0 lg:overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 pb-24 sm:gap-4 sm:p-4 md:pb-4 lg:flex-row">
+        <section className="w-full shrink-0 lg:w-[240px] lg:overflow-y-auto">
           <CustomerPanel
             phone={phone}
             firstName={firstName}
@@ -307,30 +308,40 @@ export function PosScreen() {
           />
         </section>
 
-        <section className="flex min-h-[240px] w-full flex-1 flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/50 p-3 sm:min-h-[320px] sm:p-4 lg:min-h-0">
-          <ProductCatalog
-            products={products}
-            onSelectProduct={handleSelectProduct}
-            onProductAdded={refresh}
-          />
-        </section>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-4">
+          <section className="flex max-h-[38vh] min-h-[180px] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/50 bg-white p-2 dark:border-slate-700 dark:bg-slate-900 sm:max-h-[42vh] sm:p-3 lg:max-h-none lg:min-h-0 lg:flex-[3]">
+            <ProductCatalog
+              products={products}
+              onSelectProduct={handleSelectProduct}
+              onProductAdded={refresh}
+            />
+          </section>
 
-        <section className="flex min-h-[280px] w-full shrink-0 flex-col overflow-hidden lg:min-h-0">
-          <CartPanel
-            items={cart}
-            subtotal={subtotal}
-            discountAmount={discountAmount}
-            total={total}
-            couponCode={couponCode}
-            couponMessage={couponMessage}
-            onServiceChange={(key, st) => void handleServiceChange(key, st)}
-            onRemove={handleRemove}
-            onCouponCodeChange={setCouponCode}
-            onApplyCoupon={() => void handleApplyCoupon()}
-            onPay={() => setPaymentDialogOpen(true)}
-          />
-        </section>
+          <section className="flex min-h-[200px] min-w-0 flex-1 flex-col overflow-hidden lg:flex-[7]">
+            <CartPanel
+              items={cart}
+              subtotal={subtotal}
+              discountAmount={discountAmount}
+              total={total}
+              couponCode={couponCode}
+              couponMessage={couponMessage}
+              onServiceChange={(key, st) => void handleServiceChange(key, st)}
+              onRemove={handleRemove}
+              onCouponCodeChange={setCouponCode}
+              onApplyCoupon={() => void handleApplyCoupon()}
+              onPay={() => setPaymentDialogOpen(true)}
+              hideMobileCheckout
+            />
+          </section>
+        </div>
       </div>
+
+      <PosStickyBar
+        total={total}
+        itemCount={cart.length}
+        disabled={cart.length === 0}
+        onPay={() => setPaymentDialogOpen(true)}
+      />
 
       <OrderSuccessDialog
         open={showSuccess}

@@ -42,7 +42,7 @@ export function CustomerDetailScreen() {
       getCustomerTags(),
     ]);
     if (!c) {
-      navigate("/customers");
+      navigate("/dashboard/customers");
       return;
     }
     setCustomer(c);
@@ -82,10 +82,10 @@ export function CustomerDetailScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <div className="flex items-center gap-4 border-b border-border/60 px-6 py-4">
         <Button variant="ghost" size="icon" asChild>
-          <Link to="/customers">
+          <Link to="/dashboard/customers">
             <ArrowLeft className="size-5" />
           </Link>
         </Button>

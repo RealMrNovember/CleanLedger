@@ -91,7 +91,7 @@ export function CustomersScreen() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
         <div>
           <h1 className="text-2xl font-bold">Müşteriler</h1>

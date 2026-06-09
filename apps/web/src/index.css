@@ -1,6 +1,7 @@
 @import "tailwindcss";
+@config "../tailwind.config.js";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --color-background: var(--background);
@@ -50,6 +51,29 @@
   --border: #e2e8f0;
   --input: #e2e8f0;
   --ring: #4ecdc4;
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
+  --primary: #4ecdc4;
+  --primary-foreground: #0f3d3a;
+  --secondary: #1e3a4a;
+  --secondary-foreground: #bae6fd;
+  --muted: #334155;
+  --muted-foreground: #94a3b8;
+  --accent: #45b7d1;
+  --accent-foreground: #ffffff;
+  --destructive: #f87171;
+  --border: #334155;
+  --input: #334155;
+  --ring: #4ecdc4;
+  --color-mint-light: #134e4a;
+  --color-trust-light: #164e63;
+  --color-surface: #1e293b;
+  --color-ink: #f1f5f9;
 }
 
 @layer base {

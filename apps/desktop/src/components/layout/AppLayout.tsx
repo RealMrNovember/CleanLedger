@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { SidebarNav } from "@/components/layout/SidebarNav";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { UpdateChecker } from "@/components/updater/UpdateChecker";
 import { useAuth } from "@/context/AuthContext";
@@ -90,10 +91,10 @@ export function AppLayout() {
   };
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background md:flex-row">
+    <div className="flex h-[100dvh] flex-col bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100 md:flex-row">
       <aside
         className={cn(
-          "hidden shrink-0 flex-col border-r border-border/60 bg-card/90 transition-[width] duration-200 md:flex",
+          "hidden shrink-0 flex-col border-r border-border/60 bg-white/90 transition-[width] duration-200 dark:bg-slate-900/90 md:flex",
           collapsed ? "w-[4.5rem]" : "w-56"
         )}
       >
@@ -147,7 +148,7 @@ export function AppLayout() {
       )}
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-border/60 bg-card/60 px-3 py-2 backdrop-blur-sm md:px-6">
+        <div className="flex items-center gap-3 border-b border-border/60 bg-white/80 px-3 py-2 backdrop-blur-sm dark:bg-slate-900/80 md:px-6">
           <button
             type="button"
             className="inline-flex size-10 items-center justify-center rounded-xl border border-border/60 md:hidden"
@@ -161,6 +162,7 @@ export function AppLayout() {
               {formatWelcome(organization.adminName, organization.companyName)}
             </p>
           )}
+          <ThemeToggle />
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           <Outlet />

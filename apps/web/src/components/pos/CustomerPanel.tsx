@@ -44,7 +44,7 @@ export function CustomerPanel({
   const showNameFields = phone.trim().length >= 10;
 
   return (
-    <Card className="h-full w-full border-border/50 bg-card/80 shadow-none">
+    <Card className="h-full w-full border-border/50 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground/80">
           <Phone className="size-5 text-mint" />
