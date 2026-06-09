@@ -1,6 +1,6 @@
 # CleanLedger Web
 
-Tanıtım sitesi ve üyelik portalı iskeleti — `cleanledger.cicibyte.com`
+Tanıtım sitesi — `cleanledger.cicibyte.com`
 
 ## Geliştirme
 
@@ -10,16 +10,14 @@ npm install
 npm run dev
 ```
 
-## Production build
+## Canlıya alma (sadece cleanledger dizini)
+
+Nginx bu site için `apps/web` klasörünü servis eder. Build çıktısını oraya kopyalayın:
 
 ```bash
-npm run build
-# Çıktı: dist/
+cd apps/web
+npm run deploy:live
 ```
 
-VDS'de site köküne deploy:
-
-```bash
-npm run build
-rsync -av dist/ /www/wwwroot/cleanledger.cicibyte.com/
-```
+Bu komut `dist/` içeriğini `apps/web/index.html` ve `apps/web/assets/` olarak yazar.
+Sunucu veya diğer projelere dokunulmaz.

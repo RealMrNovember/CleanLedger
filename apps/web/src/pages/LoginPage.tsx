@@ -1,9 +1,36 @@
-import { Link } from "react-router-dom";
-import { Mail, Lock, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Mail, Lock, Loader2 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { useAuth } from "@/context/AuthContext";
 
 export function LoginPage() {
+  const navigate = useNavigate();
+  const { login } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!email.trim() || !password.trim()) {
+      setError("E-posta ve şifre gereklidir.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await login(email, password);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Giriş başarısız.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-surface">
       <Navbar />
@@ -11,9 +38,6 @@ export function LoginPage() {
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-mint to-trust text-white">
-              <Sparkles className="size-7" />
-            </div>
             <h1 className="text-2xl font-bold">Hesabınıza Giriş Yapın</h1>
             <p className="mt-2 text-muted">
               Lisans ve işletme panelinize erişin
@@ -22,42 +46,40 @@ export function LoginPage() {
 
           <form
             className="rounded-2xl border border-slate-200/80 bg-white p-8 shadow-sm"
-            onSubmit={(e) => e.preventDefault()}
+            onSubmit={(e) => void handleSubmit(e)}
+            noValidate
           >
+            {error && (
+              <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                {error}
+              </p>
+            )}
             <div className="space-y-5">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">
-                  E-posta
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted" />
-                  <input
-                    type="email"
-                    placeholder="ornek@firma.com"
-                    className="h-12 w-full rounded-xl border-2 border-slate-200 bg-surface pl-12 pr-4 outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-ink">
-                  Şifre
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted" />
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    className="h-12 w-full rounded-xl border-2 border-slate-200 bg-surface pl-12 pr-4 outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20"
-                  />
-                </div>
-              </div>
-
+              <Field label="E-posta" icon={Mail}>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="ornek@firma.com"
+                  className="field-input"
+                />
+              </Field>
+              <Field label="Şifre" icon={Lock}>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="field-input"
+                />
+              </Field>
               <button
                 type="submit"
-                className="h-12 w-full rounded-xl bg-mint font-semibold text-[#0f3d3a] transition hover:bg-mint/90"
+                disabled={submitting}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-mint font-semibold text-[#0f3d3a] transition hover:bg-mint/90 disabled:opacity-60"
               >
-                Giriş Yap
+                {submitting && <Loader2 className="size-5 animate-spin" />}
+                {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
               </button>
             </div>
 
@@ -68,15 +90,30 @@ export function LoginPage() {
               </Link>
             </p>
           </form>
-
-          <p className="mt-6 text-center text-xs text-muted">
-            Bu portal yakında aktif olacaktır. Şimdilik masaüstü uygulamasından
-            kayıt olabilirsiniz.
-          </p>
         </div>
       </main>
 
       <Footer />
+    </div>
+  );
+}
+
+function Field({
+  label,
+  icon: Icon,
+  children,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-medium text-ink">{label}</label>
+      <div className="relative">
+        <Icon className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted" />
+        {children}
+      </div>
     </div>
   );
 }
