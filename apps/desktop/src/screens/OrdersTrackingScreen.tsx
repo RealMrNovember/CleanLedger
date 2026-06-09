@@ -7,22 +7,33 @@ import {
   Truck,
   CreditCard,
   RotateCcw,
+  Undo2,
+  Trash2,
 } from "lucide-react";
-import type { OrderWithMeta, OrderStatus, PaymentStatus } from "@/db/schema";
+import type {
+  OrderWithMeta,
+  OrderStatus,
+  PaymentStatus,
+  OrderPayment,
+  PaymentMethod,
+} from "@/db/schema";
 import {
   ORDER_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
 } from "@/db/schema";
 import {
   getActiveOrders,
   getDeliveredOrders,
   getOrderDashboardStats,
+  getOrderPayments,
+  refundOrderPayment,
   updateOrderOrderStatus,
-  updateOrderPaymentStatus,
   initDatabase,
 } from "@/db/client";
 import { useAuth } from "@/context/AuthContext";
 import { WhatsAppButton } from "@/components/WhatsAppButton";
+import { AddPaymentDialog } from "@/components/orders/AddPaymentDialog";
 import {
   buildDebtMessage,
   buildOrderReadyMessage,
@@ -45,6 +56,9 @@ export function OrdersTrackingScreen() {
   });
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [payments, setPayments] = useState<OrderPayment[]>([]);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [refundingId, setRefundingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,21 +82,27 @@ export function OrdersTrackingScreen() {
 
   const selected = orders.find((o) => o.id === selectedId);
 
+  useEffect(() => {
+    if (!selected) {
+      setPayments([]);
+      return;
+    }
+    void getOrderPayments(selected.id).then(setPayments);
+  }, [selected?.id, selected?.amountPaid, selected?.balanceDue]);
+
   const whatsAppForOrder = (order: OrderWithMeta) => {
     const name = order.customerName ?? "Müşterimiz";
     const debt = order.balanceDue ?? 0;
     const message =
       debt > 0
         ? buildDebtMessage(name, debt, shopName)
-        : order.orderStatus === "ready"
-          ? buildOrderReadyMessage(name, shopName)
-          : buildOrderReadyMessage(name, shopName);
+        : buildOrderReadyMessage(name, shopName);
     return buildWhatsAppUrl(order.customerPhone, message);
   };
 
-  const handleMarkPaid = async (id: number) => {
-    await updateOrderPaymentStatus(id, "paid");
-    await load();
+  const refreshSelectedPayments = async () => {
+    if (!selected) return;
+    setPayments(await getOrderPayments(selected.id));
   };
 
   const handleMarkReady = async (id: number) => {
@@ -101,8 +121,41 @@ export function OrdersTrackingScreen() {
     await load();
   };
 
+  const handleRefundPayment = async (paymentId: number) => {
+    if (!window.confirm("Bu ödeme kaydını iade etmek istiyor musunuz?")) return;
+    setRefundingId(paymentId);
+    try {
+      await refundOrderPayment(paymentId);
+      await load();
+      await refreshSelectedPayments();
+    } finally {
+      setRefundingId(null);
+    }
+  };
+
+  const canUndoStatus =
+    selected &&
+    ((tab === "active" && selected.orderStatus === "ready") ||
+      (tab === "delivered" && selected.orderStatus === "delivered"));
+
+  const handleUndoStatus = async () => {
+    if (!selected) return;
+    if (selected.orderStatus === "ready") {
+      await handleMarkPreparing(selected.id);
+    } else if (selected.orderStatus === "delivered") {
+      await handleMarkReady(selected.id);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      <AddPaymentDialog
+        open={paymentDialogOpen}
+        onOpenChange={setPaymentDialogOpen}
+        order={selected ?? null}
+        onAdded={load}
+      />
+
       <div className="border-b border-border/60 px-6 py-4">
         <h1 className="text-2xl font-bold">Sipariş Takibi</h1>
         <p className="text-sm text-muted-foreground">
@@ -212,6 +265,11 @@ export function OrdersTrackingScreen() {
                   >
                     {PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus]}
                   </Badge>
+                  {order.balanceDue > 0 && (
+                    <span className="text-xs font-medium text-[#b45309]">
+                      Kalan: {formatCurrency(order.balanceDue)}
+                    </span>
+                  )}
                   <span className="text-xs text-muted-foreground">
                     Teslim:{" "}
                     {parseDateKey(order.deliveryDate).toLocaleDateString("tr-TR")} ·{" "}
@@ -227,7 +285,23 @@ export function OrdersTrackingScreen() {
           <CardContent className="flex flex-1 flex-col p-5">
             {selected ? (
               <>
-                <h2 className="text-lg font-bold">{selected.orderNumber}</h2>
+                <div className="flex items-start justify-between gap-2">
+                  <h2 className="text-lg font-bold">{selected.orderNumber}</h2>
+                  {canUndoStatus && (
+                    <button
+                      type="button"
+                      onClick={() => void handleUndoStatus()}
+                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground transition hover:border-mint/40 hover:bg-mint-light/40 hover:text-[#0f3d3a]"
+                      title={
+                        selected.orderStatus === "ready"
+                          ? "Hazırlanıyor'a geri al"
+                          : "Hazır statüsüne geri al"
+                      }
+                    >
+                      <Undo2 className="size-4" />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-muted-foreground">
                     {selected.customerName ?? selected.customerPhone}
@@ -239,6 +313,14 @@ export function OrdersTrackingScreen() {
                 </div>
                 <div className="my-4 space-y-2 text-sm">
                   <Row label="Tutar" value={formatCurrency(selected.totalAmount)} />
+                  <Row
+                    label="Ödenen"
+                    value={formatCurrency(selected.amountPaid)}
+                  />
+                  <Row
+                    label="Kalan"
+                    value={formatCurrency(selected.balanceDue)}
+                  />
                   <Row
                     label="Teslim Tarihi"
                     value={parseDateKey(selected.deliveryDate).toLocaleDateString(
@@ -261,19 +343,74 @@ export function OrdersTrackingScreen() {
                   />
                   <Row
                     label="Öncelik"
-                    value={
-                      selected.priority === "urgent" ? "Acil" : "Normal"
-                    }
+                    value={selected.priority === "urgent" ? "Acil" : "Normal"}
                   />
                   <Row label="Parça" value={`${selected.itemCount} adet`} />
                 </div>
+
+                <div className="mb-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Ödeme Geçmişi
+                  </p>
+                  {payments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Henüz ödeme kaydı yok.
+                    </p>
+                  ) : (
+                    <ul className="max-h-36 space-y-2 overflow-y-auto">
+                      {payments.map((payment) => (
+                        <li
+                          key={payment.id}
+                          className={cn(
+                            "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm",
+                            payment.refunded
+                              ? "border-dashed opacity-60"
+                              : "border-border/60"
+                          )}
+                        >
+                          <div>
+                            <p className="font-medium">
+                              {formatCurrency(payment.amount)}
+                              {payment.refunded && (
+                                <span className="ml-2 text-xs text-muted-foreground">
+                                  (İade)
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {PAYMENT_METHOD_LABELS[
+                                payment.paymentMethod as PaymentMethod
+                              ]}{" "}
+                              ·{" "}
+                              {new Date(payment.createdAt).toLocaleString(
+                                "tr-TR"
+                              )}
+                            </p>
+                          </div>
+                          {!payment.refunded && (
+                            <button
+                              type="button"
+                              disabled={refundingId === payment.id}
+                              onClick={() => void handleRefundPayment(payment.id)}
+                              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-destructive transition hover:bg-destructive/10"
+                              title="İade / Sil"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
                 {tab === "active" && (
                   <div className="mt-auto space-y-2">
-                    {selected.paymentStatus === "unpaid" && (
+                    {selected.balanceDue > 0 && (
                       <Button
                         className="w-full gap-2"
                         variant="outline"
-                        onClick={() => void handleMarkPaid(selected.id)}
+                        onClick={() => setPaymentDialogOpen(true)}
                       >
                         <CreditCard className="size-4" />
                         Ödeme Alındı

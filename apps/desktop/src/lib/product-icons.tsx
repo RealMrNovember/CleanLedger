@@ -1,55 +1,54 @@
 import {
   Shirt,
-  Layers,
-  Layers2,
-  Briefcase,
   BriefcaseBusiness,
   BedDouble,
   Square,
   LayoutGrid,
   Lamp,
   Ribbon,
-  Triangle,
+  ShoppingBag,
   Package,
   type LucideIcon,
 } from "lucide-react";
 
-/** Kuru temizleme sektörü — 12 özel kategori ikonu (+ legacy eşleme) */
+/** Ürün ikon eşlemesi — kuru temizleme odaklı set */
 const ICON_MAP: Record<string, LucideIcon> = {
   shirt: Shirt,
-  coat: Layers,
-  jacket: Layers2,
   tshirt: Shirt,
+  jacket: BriefcaseBusiness,
+  coat: BriefcaseBusiness,
   pants: Ribbon,
-  skirt: Triangle,
+  skirt: LayoutGrid,
   blanket: BedDouble,
   tablecloth: Square,
-  carpet: LayoutGrid,
+  carpet: Square,
   lamp: Lamp,
-  bag: Briefcase,
+  bag: ShoppingBag,
   leather: BriefcaseBusiness,
   default: Package,
-  // legacy ürünler
-  jacket_old: Briefcase,
+  // legacy
+  jacket_old: BriefcaseBusiness,
   pants_old: Ribbon,
-  coat_old: Layers,
-  dress: Triangle,
-  skirt_old: Triangle,
+  coat_old: BriefcaseBusiness,
+  dress: LayoutGrid,
+  skirt_old: LayoutGrid,
   bed: BedDouble,
   curtain: Lamp,
   sofa: Square,
   towel: Square,
-  shoe: Briefcase,
-  hat: Briefcase,
-  bag_old: Briefcase,
-  watch: Briefcase,
+  shoe: ShoppingBag,
+  hat: BriefcaseBusiness,
+  bag_old: ShoppingBag,
+  watch: Package,
   sparkles: Lamp,
-  suit: Layers,
+  suit: BriefcaseBusiness,
   sweater: Shirt,
   tie: Ribbon,
   scarf: Lamp,
   blanket_old: BedDouble,
-  carpet_old: LayoutGrid,
+  carpet_old: Square,
+  layers: BriefcaseBusiness,
+  layers2: BriefcaseBusiness,
 };
 
 export interface ProductIconOption {
@@ -59,19 +58,17 @@ export interface ProductIconOption {
   Icon: LucideIcon;
 }
 
-/** Sadece kuru temizlemeye uygun 12 ikon */
 export const PRODUCT_ICON_OPTIONS: ProductIconOption[] = [
   { id: "shirt", label: "Gömlek", category: "Üst Giyim", Icon: Shirt },
-  { id: "coat", label: "Palto", category: "Üst Giyim", Icon: Layers },
-  { id: "jacket", label: "Ceket", category: "Üst Giyim", Icon: Layers2 },
+  { id: "jacket", label: "Ceket", category: "Üst Giyim", Icon: BriefcaseBusiness },
   { id: "tshirt", label: "Tişört", category: "Üst Giyim", Icon: Shirt },
   { id: "pants", label: "Pantolon", category: "Alt Giyim", Icon: Ribbon },
-  { id: "skirt", label: "Etek", category: "Alt Giyim", Icon: Triangle },
+  { id: "skirt", label: "Etek", category: "Alt Giyim", Icon: LayoutGrid },
   { id: "blanket", label: "Yorgan", category: "Ev Tekstili", Icon: BedDouble },
+  { id: "carpet", label: "Halı", category: "Ev Tekstili", Icon: Square },
   { id: "tablecloth", label: "Masa Örtüsü", category: "Ev Tekstili", Icon: Square },
-  { id: "carpet", label: "Halı", category: "Ev Tekstili", Icon: LayoutGrid },
   { id: "lamp", label: "Abajur / Perde", category: "Özel", Icon: Lamp },
-  { id: "bag", label: "Çanta", category: "Özel", Icon: Briefcase },
+  { id: "bag", label: "Çanta", category: "Özel", Icon: ShoppingBag },
   { id: "leather", label: "Deri Ürün", category: "Özel", Icon: BriefcaseBusiness },
 ];
 
@@ -95,3 +92,6 @@ export function getProductIconLabel(iconName: string): string {
 export function getProductIconOption(iconName: string): ProductIconOption | undefined {
   return PRODUCT_ICON_OPTIONS.find((o) => o.id === iconName);
 }
+
+/** @deprecated use product-icons — alias for compatibility */
+export { getProductIcon as default };

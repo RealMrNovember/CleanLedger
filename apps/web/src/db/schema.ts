@@ -86,6 +86,17 @@ export const orderItems = sqliteTable("order_items", {
   subtotal: real("subtotal").notNull(),
 });
 
+export const orderPayments = sqliteTable("order_payments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  orderId: integer("order_id")
+    .notNull()
+    .references(() => orders.id, { onDelete: "cascade" }),
+  amount: real("amount").notNull(),
+  paymentMethod: text("payment_method").notNull().default("cash"),
+  createdAt: text("created_at").notNull(),
+  refunded: integer("refunded").notNull().default(0),
+});
+
 export type Product = typeof products.$inferSelect;
 export type CustomerTag = typeof customerTags.$inferSelect;
 export type Coupon = typeof coupons.$inferSelect;
@@ -94,6 +105,7 @@ export type ServicePrice = typeof servicePrices.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrganizationSettings = typeof organizationSettings.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type OrderPayment = typeof orderPayments.$inferSelect;
 
 export type PaymentStatus = "paid" | "unpaid";
 export type PaymentMethod = "cash" | "card";
