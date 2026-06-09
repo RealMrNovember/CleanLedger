@@ -1,67 +1,67 @@
-{
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CleanLedger",
-  "version": "1.0.4",
-  "identifier": "com.cicibyte.cleanledger",
-  "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
-  },
-  "app": {
-    "windows": [
-      {
-        "title": "CleanLedger",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 1024,
-        "minHeight": 640,
-        "resizable": true,
-        "fullscreen": false,
-        "center": true
-      }
-    ],
-    "security": {
-      "csp": null,
-      "capabilities": ["default"]
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "publisher": "Cicibyte",
-    "createUpdaterArtifacts": true,
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "windows": {
-      "nsis": {
-        "installMode": "perMachine",
-        "installerHooks": "./windows/hooks.nsh"
-      },
-      "wix": {
-        "template": "./windows/main.wxs"
-      }
-    }
-  },
-  "plugins": {
-    "sql": {
-      "preload": ["sqlite:cleanledger.db"]
-    },
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc2RUM5RjY4RjY4RjY4CndUL3R1c3Q6IGR5b21vbnN0cnVjdG9yIG9mIG1pbmlzaWduIHB1YmxpYyBrZXk6IDc2RUM5RjY4RjY4RjY4",
-      "endpoints": [
-        "https://github.com/RealMrNovember/CleanLedger/releases/download/latest-build/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
-  }
-}
-
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CleanLedger",
+  "version": "1.0.4",
+  "identifier": "com.cicibyte.cleanledger",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CleanLedger",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "Cicibyte",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "template": "./windows/installer.nsi",
+        "installerHooks": "./windows/hooks.nsh"
+      },
+      "wix": {
+        "template": "./windows/main.wxs"
+      }
+    }
+  },
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:cleanledger.db"]
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc2RUM5RjY4RjY4RjY4CndUL3R1c3Q6IGR5b21vbnN0cnVjdG9yIG9mIG1pbmlzaWduIHB1YmxpYyBrZXk6IDc2RUM5RjY4RjY4RjY4",
+      "endpoints": [
+        "https://github.com/RealMrNovember/CleanLedger/releases/download/latest-build/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
