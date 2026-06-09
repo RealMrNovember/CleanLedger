@@ -11,6 +11,7 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
+  BarChart3,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { SidebarNav } from "@/components/layout/SidebarNav";
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button";
 const navItems = [
   { to: "/", icon: ShoppingCart, label: "Sipariş (POS)", end: true },
   { to: "/orders", icon: ClipboardList, label: "Sipariş Takibi" },
+  { to: "/reports", icon: BarChart3, label: "Raporlar" },
   { to: "/customers", icon: Users, label: "Müşteriler" },
   { to: "/settings", icon: Settings, label: "Ayarlar" },
 ];

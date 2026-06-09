@@ -47,6 +47,9 @@ export async function runSyncPull(): Promise<boolean> {
       return true;
     }
     return false;
+  } catch (err) {
+    console.warn("[CleanLedger] Sync pull içe aktarma atlandı:", err);
+    return false;
   } finally {
     pulling = false;
   }

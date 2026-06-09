@@ -54,14 +54,33 @@ async function postLicense<T>(
     body: JSON.stringify(body),
   });
 
-  const parsed = (await res.json()) as LicenseApiEnvelope<T>;
-  if (!res.ok || !parsed.success) {
-    throw new Error(parsed.message ?? `Lisans sunucusu hatası (${res.status})`);
+  const raw = await res.text();
+  let parsed: LicenseApiEnvelope<T> | null = null;
+  try {
+    parsed = raw ? (JSON.parse(raw) as LicenseApiEnvelope<T>) : null;
+  } catch {
+    throw new Error(
+      `Lisans sunucusu geçersiz yanıt döndü (HTTP ${res.status}).`
+    );
+  }
+
+  if (!parsed || !res.ok || !parsed.success) {
+    throw new Error(parsed?.message ?? `Lisans sunucusu hatası (${res.status})`);
   }
   if (!parsed.data) {
     throw new Error("Lisans sunucusu boş yanıt döndü.");
   }
   return parsed.data;
+}
+
+function createOfflineTrialSnapshot(): LicenseSnapshot {
+  return {
+    status: "trial",
+    type: "trial",
+    expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+    maxDevices: 99,
+    registeredDevices: 1,
+  };
 }
 
 export async function startTrial(hwid: string): Promise<LicenseSnapshot> {
@@ -108,8 +127,14 @@ export async function ensureLicense(hwid: string): Promise<LicenseSnapshot> {
   } catch {
     const cached = getLicenseCache();
     if (cached && isLicenseUsable(cached)) return cached;
-    const trial = await startTrial(hwid);
-    saveLicenseCache(trial);
-    return trial;
+    try {
+      const trial = await startTrial(hwid);
+      saveLicenseCache(trial);
+      return trial;
+    } catch {
+      const offline = createOfflineTrialSnapshot();
+      saveLicenseCache(offline);
+      return offline;
+    }
   }
 }
