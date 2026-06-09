@@ -1,30 +1,23 @@
 import { Logo } from "@/components/brand/Logo";
-import { formatCurrency } from "@/lib/utils";
 
 interface PosHeaderProps {
   orderCount: number;
-  total: number;
 }
 
-export function PosHeader({ orderCount, total }: PosHeaderProps) {
+export function PosHeader({ orderCount }: PosHeaderProps) {
   return (
-    <header className="flex items-center justify-between border-b border-border/60 bg-card/90 px-6 py-3 backdrop-blur-sm">
-      <Logo size="sm" />
-
-      <div className="flex items-center gap-6">
-        <div className="hidden text-right sm:block">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+    <header className="flex items-center justify-between border-b border-border/60 bg-card/90 px-3 py-2 backdrop-blur-sm sm:px-6 sm:py-3">
+      <Logo size="sm" className="scale-90 sm:scale-100" />
+      {orderCount > 0 && (
+        <div className="rounded-xl bg-mint-light/80 px-3 py-1.5 text-right sm:px-4 sm:py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-[#0f3d3a]/70 sm:text-xs">
             Sepette
           </p>
-          <p className="text-lg font-semibold">{orderCount} parça</p>
-        </div>
-        <div className="rounded-2xl bg-trust-light/80 px-5 py-2 text-right">
-          <p className="text-xs font-medium text-trust">Anlık Toplam</p>
-          <p className="text-2xl font-bold text-foreground">
-            {formatCurrency(total)}
+          <p className="text-base font-bold text-[#0f3d3a] sm:text-lg">
+            {orderCount} parça
           </p>
         </div>
-      </div>
+      )}
     </header>
   );
 }

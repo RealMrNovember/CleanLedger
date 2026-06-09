@@ -1,29 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for file system and updater access",
-  "windows": ["main"],
   "permissions": [
     "core:default",
-    "sql:default",
-    "sql:allow-load",
-    "sql:allow-execute",
-    "sql:allow-select",
-    "sql:allow-close",
     "fs:default",
     "updater:default",
     "process:default",
-    "process:allow-restart",
+    "sql:default",
     {
-      "identifier": "fs:allow-appdata-recursive",
+      "identifier": "fs-appdata-scope",
       "allow": [
-        {
-          "path": "$APPDATA/*"
-        },
-        {
-          "path": "$APPLOCALDATA/*"
-        }
-      ]
+        { "path": "$APPDATA/cleanledger/*" },
+        { "path": "$APPLOCALDATA/cleanledger/*" }
+      ],
+      "permissions": ["fs:allow-read", "fs:allow-write", "fs:allow-exists", "fs:allow-mkdir"]
     }
   ]
 }

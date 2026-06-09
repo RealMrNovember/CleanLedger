@@ -1,4 +1,4 @@
-import { Phone, CalendarDays, Zap, AlertTriangle, User } from "lucide-react";
+import { Phone, CalendarDays, Zap, AlertTriangle, User, Users } from "lucide-react";
 import type { OrderPriority } from "@/db/schema";
 import { ORDER_PRIORITY_LABELS } from "@/db/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,7 @@ interface CustomerPanelProps {
   onPhoneChange: (value: string) => void;
   onFirstNameChange: (value: string) => void;
   onLastNameChange: (value: string) => void;
+  onPickCustomer: () => void;
   deliveryDate: string;
   onDeliveryDateChange: (value: string) => void;
   priority: OrderPriority;
@@ -31,6 +32,7 @@ export function CustomerPanel({
   onPhoneChange,
   onFirstNameChange,
   onLastNameChange,
+  onPickCustomer,
   deliveryDate,
   onDeliveryDateChange,
   priority,
@@ -42,7 +44,7 @@ export function CustomerPanel({
   const showNameFields = phone.trim().length >= 10;
 
   return (
-    <Card className="h-full border-border/50 bg-card/80 shadow-none">
+    <Card className="h-full w-full border-border/50 bg-card/80 shadow-none">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground/80">
           <Phone className="size-5 text-mint" />
@@ -66,15 +68,25 @@ export function CustomerPanel({
           <label className="text-sm font-medium text-muted-foreground">
             Telefon Numarası
           </label>
-          <Input
-            type="tel"
-            inputMode="tel"
-            placeholder="05XX XXX XX XX"
-            value={phone}
-            onChange={(e) => onPhoneChange(e.target.value)}
-            className="h-14 text-xl font-medium tracking-wide"
-            autoFocus
-          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              type="tel"
+              inputMode="tel"
+              placeholder="05XX XXX XX XX"
+              value={phone}
+              onChange={(e) => onPhoneChange(e.target.value)}
+              className="h-12 flex-1 text-lg font-medium tracking-wide sm:h-14 sm:text-xl"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 shrink-0 gap-2 sm:h-14"
+              onClick={onPickCustomer}
+            >
+              <Users className="size-4" />
+              Müşteri Ara/Seç
+            </Button>
+          </div>
         </div>
 
         {showNameFields && (
