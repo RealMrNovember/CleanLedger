@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import type { ServiceType } from "@/db/schema";
 import { SERVICE_LABELS, SERVICE_TYPES } from "@/db/schema";
+import { suggestIconFromProductName } from "@/lib/product-icons";
 import { IconGalleryPicker } from "@/components/settings/IconGalleryPicker";
 import { createProduct, updateServicePrice } from "@/db/client";
 import { Button } from "@/components/ui/button";
@@ -36,12 +37,19 @@ export function AddProductDialog({
   const [iconName, setIconName] = useState("shirt");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const iconManuallyPicked = useRef(false);
+
+  useEffect(() => {
+    if (!open || iconManuallyPicked.current || !name.trim()) return;
+    setIconName(suggestIconFromProductName(name));
+  }, [name, open]);
 
   const resetForm = () => {
     setName("");
     setPrices(DEFAULT_PRICES);
     setIconName("shirt");
     setError("");
+    iconManuallyPicked.current = false;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -145,7 +153,14 @@ export function AddProductDialog({
             <label className="mb-3 block text-sm font-medium">
               Özel Ürün Kategorisi — İkon Seçin
             </label>
-            <IconGalleryPicker value={iconName} onChange={setIconName} />
+            <IconGalleryPicker
+              value={iconName}
+              previewName={name.trim() || "Örnek Ürün"}
+              onChange={(id) => {
+                iconManuallyPicked.current = true;
+                setIconName(id);
+              }}
+            />
           </div>
 
           <Button type="submit" className="w-full" size="lg" disabled={saving}>

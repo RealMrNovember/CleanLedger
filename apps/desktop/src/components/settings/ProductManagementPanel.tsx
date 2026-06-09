@@ -1,13 +1,11 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import type { Product } from "@/db/schema";
-import { SERVICE_LABELS, SERVICE_TYPES } from "@/db/schema";
 import { useCatalog } from "@/hooks/useCatalog";
-import { getProductIcon, getProductIconLabel } from "@/lib/product-icons";
-import { formatCurrency } from "@/lib/utils";
+import { SERVICE_TYPES } from "@/db/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddProductDialog } from "@/components/settings/AddProductDialog";
+import { ProductSortableList } from "@/components/settings/ProductSortableList";
 
 export function ProductManagementPanel() {
   const { products, servicePrices, refresh } = useCatalog();
@@ -15,7 +13,7 @@ export function ProductManagementPanel() {
 
   const getPrice = (productId: number, serviceType: (typeof SERVICE_TYPES)[number]) => {
     const sp = servicePrices.find(
-      (s) => s.productId === productId && s.serviceType === serviceType
+      (s) => s.productId === productId && s.serviceType === serviceType,
     );
     const product = products.find((p) => p.id === productId);
     return sp?.price ?? product?.basePrice ?? 0;
@@ -28,10 +26,10 @@ export function ProductManagementPanel() {
           <div>
             <CardTitle>Ürün Yönetimi</CardTitle>
             <p className="text-sm text-muted-foreground">
-              POS kataloğuna ürün ekleyin ve simgelerini seçin.
+              POS kataloğuna ürün ekleyin, sıralayın veya silin.
             </p>
           </div>
-          <Button className="gap-2 shrink-0" onClick={() => setAddOpen(true)}>
+          <Button className="shrink-0 gap-2" onClick={() => setAddOpen(true)}>
             <Plus className="size-4" />
             Yeni Ürün Ekle
           </Button>
@@ -42,15 +40,11 @@ export function ProductManagementPanel() {
               Henüz ürün yok. Yeni ürün ekleyerek başlayın.
             </p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {products.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  getPrice={getPrice}
-                />
-              ))}
-            </div>
+            <ProductSortableList
+              products={products}
+              getPrice={getPrice}
+              onChanged={refresh}
+            />
           )}
         </CardContent>
       </Card>
@@ -61,39 +55,5 @@ export function ProductManagementPanel() {
         onCreated={() => void refresh()}
       />
     </>
-  );
-}
-
-function ProductCard({
-  product,
-  getPrice,
-}: {
-  product: Product;
-  getPrice: (id: number, st: (typeof SERVICE_TYPES)[number]) => number;
-}) {
-  const Icon = getProductIcon(product.iconName);
-
-  return (
-    <div className="rounded-2xl border border-border/60 bg-card p-4">
-      <div className="mb-4 flex items-center gap-3">
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-mint-light text-mint">
-          <Icon className="size-7" />
-        </div>
-        <div>
-          <p className="font-bold">{product.name}</p>
-          <p className="text-xs text-muted-foreground">
-            {getProductIconLabel(product.iconName)}
-          </p>
-        </div>
-      </div>
-      <div className="space-y-1 text-xs">
-        {SERVICE_TYPES.map((st) => (
-          <div key={st} className="flex justify-between gap-2">
-            <span className="text-muted-foreground">{SERVICE_LABELS[st]}</span>
-            <span className="font-medium">{formatCurrency(getPrice(product.id, st))}</span>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
