@@ -14,6 +14,7 @@ import { OrdersTrackingScreen } from "@/screens/OrdersTrackingScreen";
 import { CustomersScreen } from "@/screens/CustomersScreen";
 import { CustomerDetailScreen } from "@/screens/CustomerDetailScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
+import { ReportsScreen } from "@/screens/ReportsScreen";
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
                 <Route element={<AppLayout />}>
                   <Route path="/" element={<PosScreen />} />
                   <Route path="/orders" element={<OrdersTrackingScreen />} />
+                  <Route path="/reports" element={<ReportsScreen />} />
                   <Route path="/customers" element={<CustomersScreen />} />
                   <Route
                     path="/customers/:id"

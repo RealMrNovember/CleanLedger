@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode, type ComponentType } from "react";
+import { useCallback, useEffect, useState, type ReactNode, type ComponentType, type MouseEvent } from "react";
 import {
   CalendarClock,
   Package,
@@ -67,6 +67,7 @@ export function OrdersTrackingScreen() {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [reprintLoading, setReprintLoading] = useState(false);
+  const [listReprintId, setListReprintId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -169,6 +170,20 @@ export function OrdersTrackingScreen() {
       alert("Fiş oluşturulamadı.");
     } finally {
       setReprintLoading(false);
+    }
+  };
+
+  const handleReprintFromList = async (order: OrderWithMeta, e: MouseEvent) => {
+    e.stopPropagation();
+    setListReprintId(order.id);
+    try {
+      const data = await buildReceiptDataFromOrder(order, order.customerName);
+      setReceiptData(data);
+      setReceiptOpen(true);
+    } catch {
+      alert("Fiş oluşturulamadı.");
+    } finally {
+      setListReprintId(null);
     }
   };
 
@@ -280,9 +295,20 @@ export function OrdersTrackingScreen() {
                       />
                     </div>
                   </div>
-                  <p className="text-lg font-bold text-trust">
-                    {formatCurrency(order.totalAmount)}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-lg font-bold text-trust">
+                      {formatCurrency(order.totalAmount)}
+                    </p>
+                    <button
+                      type="button"
+                      title="Fişi yazdır"
+                      disabled={listReprintId === order.id}
+                      onClick={(e) => void handleReprintFromList(order, e)}
+                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground transition hover:border-mint/40 hover:bg-mint-light/40 hover:text-[#0f3d3a]"
+                    >
+                      <Printer className="size-4" />
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Badge variant="status">
