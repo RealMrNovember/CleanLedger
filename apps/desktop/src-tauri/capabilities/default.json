@@ -1,19 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
+  "description": "CleanLedger secure capability",
   "permissions": [
     "core:default",
     "fs:default",
     "updater:default",
     "process:default",
     "sql:default",
-    {
-      "identifier": "fs-appdata-scope",
-      "allow": [
-        { "path": "$APPDATA/cleanledger/*" },
-        { "path": "$APPLOCALDATA/cleanledger/*" }
-      ],
-      "permissions": ["fs:allow-read", "fs:allow-write", "fs:allow-exists", "fs:allow-mkdir"]
-    }
+    "fs:read-app-specific-dirs-recursive",
+    "fs:write-files"
   ]
 }
