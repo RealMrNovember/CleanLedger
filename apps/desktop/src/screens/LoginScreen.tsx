@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export function LoginScreen() {
-  const { login } = useAuth();
+  const { login, dbError } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -64,9 +64,9 @@ export function LoginScreen() {
           className="rounded-3xl border border-white/20 bg-white/10 p-8 shadow-2xl backdrop-blur-xl"
           noValidate
         >
-          {error && (
+          {(dbError || error) && (
             <p className="mb-4 rounded-xl border border-red-400/40 bg-red-950/60 px-3 py-2 text-sm font-medium text-red-100">
-              {error}
+              {dbError ?? error}
             </p>
           )}
 
@@ -94,7 +94,7 @@ export function LoginScreen() {
 
             <Button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || Boolean(dbError)}
               className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#0f3d3a] to-[#2d6a4f] text-base font-semibold text-white shadow-lg hover:opacity-95"
             >
               {submitting && <Loader2 className="size-5 animate-spin" />}
