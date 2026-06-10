@@ -42,7 +42,7 @@ export function WhatsAppButton({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        openWhatsApp(href);
+        void openWhatsApp(href);
       }}
       className={cn(
         "inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white",

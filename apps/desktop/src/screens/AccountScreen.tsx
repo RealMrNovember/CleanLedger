@@ -1,18 +1,28 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Sparkles, Calendar, KeyRound, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import {
+  LogOut,
+  Sparkles,
+  Calendar,
+  KeyRound,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+} from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { DownloadButton } from "@/components/DownloadButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLicenseStatus } from "@/hooks/useLicenseStatus";
-import { formatLicenseDetail, isLifetimeLicense } from "@/lib/license-display";
+import {
+  formatLicenseDetail,
+  isLifetimeLicense,
+} from "@/lib/license-display";
 import { cn } from "@/lib/utils";
 
-export function AccountPage() {
+export function AccountScreen() {
   const navigate = useNavigate();
-  const { user, logout, changePassword } = useAuth();
+  const { user, organization, logout, changePassword } = useAuth();
   const { license, loading: licenseLoading, label: licenseLabel } =
     useLicenseStatus(user?.email);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -26,14 +36,16 @@ export function AccountPage() {
 
   if (!user) return null;
 
-  const trialEnd = new Date(user.trialEndsAt).toLocaleDateString("tr-TR");
+  const trialEnd = user.trialEndsAt
+    ? new Date(user.trialEndsAt).toLocaleDateString("tr-TR")
+    : "—";
   const lifetime = license ? isLifetimeLicense(license) : false;
   const trialLicense =
     license?.status === "trial" || license?.type?.toLowerCase() === "trial";
 
-  const handleLogout = () => {
-    logout();
-    navigate("/", { replace: true });
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login", { replace: true });
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -56,10 +68,7 @@ export function AccountPage() {
 
     setSaving(true);
     try {
-      await changePassword({
-        currentPassword,
-        newPassword,
-      });
+      await changePassword({ currentPassword, newPassword });
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -79,7 +88,7 @@ export function AccountPage() {
         <div>
           <h1 className="text-2xl font-bold">Hesabım</h1>
           <p className="text-sm text-muted-foreground">
-            Profil, güvenlik ve masaüstü uygulaması
+            Profil, lisans ve güvenlik
           </p>
         </div>
 
@@ -88,9 +97,9 @@ export function AccountPage() {
             <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-mint to-trust text-white">
               <Sparkles className="size-7" />
             </div>
-            <CardTitle>{user.companyName}</CardTitle>
+            <CardTitle>{organization?.companyName ?? user.companyName}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Web paneliniz aktif — veriler tarayıcınızda saklanır
+              Masaüstü uygulaması — offline çalışır, bulut ile senkronize olur
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -123,8 +132,8 @@ export function AccountPage() {
                   </p>
                 )}
               </div>
-              {!lifetime && (
-                <div className="rounded-xl bg-mint-light/50 p-4 dark:bg-teal-950/40">
+              {!lifetime && user.trialEndsAt && (
+                <div className="rounded-xl bg-mint-light/50 p-4 dark:bg-teal-950/40 sm:col-span-2">
                   <p className="text-xs font-medium text-[#0f5f57] dark:text-teal-200">
                     Hesap Deneme Süresi
                   </p>
@@ -136,18 +145,10 @@ export function AccountPage() {
               )}
             </div>
 
-            <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
-              <p className="mb-3 text-sm text-muted-foreground">
-                Offline çalışma ve yazdırma için Windows masaüstü uygulamasını
-                indirin. Aynı e-posta ile giriş yapın.
-              </p>
-              <DownloadButton variant="secondary" />
-            </div>
-
             <Button
               variant="outline"
               className="w-full gap-2"
-              onClick={handleLogout}
+              onClick={() => void handleLogout()}
             >
               <LogOut className="size-4" />
               Çıkış Yap
@@ -162,12 +163,15 @@ export function AccountPage() {
               Şifre Yönetimi
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Hesabınızın şifresini buradan güncelleyebilirsiniz. Masaüstü
-              uygulamasında da aynı şifre geçerlidir.
+              Şifrenizi buradan güncelleyebilirsiniz. Web panelinde de aynı şifre
+              geçerlidir.
             </p>
           </CardHeader>
           <CardContent>
-            <form onSubmit={(e) => void handleChangePassword(e)} className="space-y-4">
+            <form
+              onSubmit={(e) => void handleChangePassword(e)}
+              className="space-y-4"
+            >
               <PasswordField
                 label="Mevcut Şifre"
                 value={currentPassword}

@@ -99,6 +99,19 @@ export async function checkLicense(hwid: string): Promise<LicenseSnapshot> {
   return mapSnapshot(data);
 }
 
+/** Hesap e-postası ile canlı lisans durumu (hwid cihaz kaydı için gönderilir). */
+export async function checkLicenseByEmail(
+  email: string,
+  hwid: string
+): Promise<LicenseSnapshot> {
+  const data = await postLicense<LicenseServerData>("check", {
+    app_code: APP_CODE,
+    hwid,
+    email: email.trim().toLowerCase(),
+  });
+  return mapSnapshot(data);
+}
+
 export function isLicenseUsable(snapshot: LicenseSnapshot): boolean {
   if (!["active", "trial"].includes(snapshot.status)) return false;
   const expires = new Date(snapshot.expiresAt).getTime();

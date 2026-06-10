@@ -15,6 +15,7 @@ import { CustomersScreen } from "@/screens/CustomersScreen";
 import { CustomerDetailScreen } from "@/screens/CustomerDetailScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 import { ReportsScreen } from "@/screens/ReportsScreen";
+import { AccountScreen } from "@/screens/AccountScreen";
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
                     element={<CustomerDetailScreen />}
                   />
                   <Route path="/settings" element={<SettingsScreen />} />
+                  <Route path="/account" element={<AccountScreen />} />
                 </Route>
               </Route>
               <Route path="*" element={<RootRedirect />} />

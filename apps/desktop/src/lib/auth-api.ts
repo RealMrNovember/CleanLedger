@@ -167,3 +167,67 @@ export async function fetchProfileRemote(token: string): Promise<AuthUser> {
   );
   return res.user;
 }
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+async function changePasswordLocal(
+  email: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<AuthSession> {
+  const users = getLocalUsers();
+  const found = users.find(
+    (u) => u.email.toLowerCase() === email.trim().toLowerCase()
+  );
+  if (!found) {
+    throw new Error(
+      "Hesap bulunamadı. Sunucu üzerinden kayıt olduysanız tekrar deneyin."
+    );
+  }
+  if (found.password !== currentPassword) {
+    throw new Error("Mevcut şifre hatalı.");
+  }
+  found.password = newPassword;
+  found.token = makeToken();
+  saveLocalUsers(users);
+  return { token: found.token, user: stripPassword(found) };
+}
+
+export async function changePasswordRemote(
+  token: string,
+  email: string,
+  input: ChangePasswordInput
+): Promise<AuthSession> {
+  const { currentPassword, newPassword } = input;
+
+  if (!currentPassword || !newPassword) {
+    throw new Error("Mevcut ve yeni şifre gerekli.");
+  }
+  if (newPassword.length < 6) {
+    throw new Error("Yeni şifre en az 6 karakter olmalı.");
+  }
+  if (currentPassword === newPassword) {
+    throw new Error("Yeni şifre mevcut şifreden farklı olmalı.");
+  }
+
+  try {
+    const res = await apiRequest<{
+      success: boolean;
+      token: string;
+      user: AuthUser;
+    }>("change_password", {
+      token,
+      currentPassword,
+      newPassword,
+    });
+    return { token: res.token, user: res.user };
+  } catch (err) {
+    if (import.meta.env.PROD) {
+      throw err instanceof Error ? err : new Error("Şifre güncellenemedi.");
+    }
+    return changePasswordLocal(email, currentPassword, newPassword);
+  }
+}

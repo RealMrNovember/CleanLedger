@@ -10,6 +10,8 @@ import type { AuthSession, AuthUser } from "@/lib/auth-api";
 import {
   loginRemote,
   fetchProfileRemote,
+  changePasswordRemote,
+  type ChangePasswordInput,
 } from "@/lib/auth-api";
 import { ensureLicense, isLicenseUsable } from "@/lib/license-client";
 import { getInstallationId } from "@/lib/installation";
@@ -64,6 +66,7 @@ interface AuthContextValue {
   dbError: string | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  changePassword: (input: ChangePasswordInput) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -237,6 +240,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganization(null);
   }, []);
 
+  const changePassword = useCallback(
+    async (input: ChangePasswordInput) => {
+      const current = session ?? loadSession();
+      if (!current?.token || !current.user?.email) {
+        throw new Error("Oturum bulunamadı. Lütfen tekrar giriş yapın.");
+      }
+      const next = await changePasswordRemote(
+        current.token,
+        current.user.email,
+        input
+      );
+      persistSession(next);
+      setSession(next);
+      const org = await syncOrganization(next);
+      setOrganization(org);
+    },
+    [session]
+  );
+
   const token = session?.token?.trim() ?? null;
 
   return (
@@ -249,6 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         dbError,
         isAuthenticated: Boolean(token && session?.user),
         login,
+        changePassword,
         logout,
       }}
     >

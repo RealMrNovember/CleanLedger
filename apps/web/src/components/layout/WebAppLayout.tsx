@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import {
-  LayoutGrid,
   Settings,
   ShoppingCart,
   ClipboardList,
@@ -18,6 +17,7 @@ import { Logo } from "@/components/brand/Logo";
 import { SidebarNav } from "@/components/layout/SidebarNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
+import { LicenseBadge } from "@/components/license/LicenseBadge";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -41,10 +41,12 @@ function SidebarContent({
   collapsed,
   onNavigate,
   onLogout,
+  userEmail,
 }: {
   collapsed: boolean;
   onNavigate?: () => void;
   onLogout: () => void;
+  userEmail?: string;
 }) {
   return (
     <>
@@ -58,12 +60,7 @@ function SidebarContent({
       </div>
       <SidebarNav items={navItems} collapsed={collapsed} onNavigate={onNavigate} />
       <div className="space-y-2 border-t border-border/60 p-2">
-        {!collapsed && (
-          <div className="flex items-center gap-2 rounded-xl bg-trust-light/50 px-3 py-2 text-xs text-trust">
-            <LayoutGrid className="size-4 shrink-0" />
-            <span>Web POS — tarayıcıda</span>
-          </div>
-        )}
+        <LicenseBadge email={userEmail} collapsed={collapsed} />
         <Button
           variant="ghost"
           size="sm"
@@ -102,7 +99,7 @@ export function WebAppLayout() {
           collapsed ? "w-[4.5rem]" : "w-56"
         )}
       >
-        <SidebarContent collapsed={collapsed} onLogout={handleLogout} />
+        <SidebarContent collapsed={collapsed} onLogout={handleLogout} userEmail={user?.email} />
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
@@ -144,6 +141,7 @@ export function WebAppLayout() {
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
               onLogout={handleLogout}
+              userEmail={user?.email}
             />
           </aside>
         </div>
