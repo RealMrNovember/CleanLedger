@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutGrid,
@@ -19,6 +19,8 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { UpdateChecker } from "@/components/updater/UpdateChecker";
 import { useAuth } from "@/context/AuthContext";
+import { LicenseBadge } from "@/components/LicenseBadge";
+import type { LicenseSnapshot } from "@/lib/license-client";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
@@ -40,10 +42,12 @@ function SidebarContent({
   collapsed,
   onNavigate,
   onLogout,
+  license,
 }: {
   collapsed: boolean;
   onNavigate?: () => void;
   onLogout: () => void;
+  license: LicenseSnapshot | null;
 }) {
   return (
     <>
@@ -63,6 +67,7 @@ function SidebarContent({
             <span>Offline-first POS</span>
           </div>
         )}
+        <LicenseBadge license={license} compact={collapsed} />
         <Button
           variant="ghost"
           size="sm"
@@ -82,10 +87,14 @@ function SidebarContent({
 }
 
 export function AppLayout() {
-  const { organization, logout } = useAuth();
+  const { organization, license, logout, refreshLicense } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    void refreshLicense();
+  }, [refreshLicense]);
 
   const handleLogout = async () => {
     await logout();
@@ -103,6 +112,7 @@ export function AppLayout() {
         <SidebarContent
           collapsed={collapsed}
           onLogout={() => void handleLogout()}
+          license={license}
         />
         <button
           type="button"
@@ -144,6 +154,7 @@ export function AppLayout() {
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
               onLogout={() => void handleLogout()}
+              license={license}
             />
           </aside>
         </div>
