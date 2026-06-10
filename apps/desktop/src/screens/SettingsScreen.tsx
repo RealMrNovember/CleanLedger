@@ -13,8 +13,16 @@ import { GeneralSettingsPanel } from "@/components/settings/GeneralSettingsPanel
 import { ProductManagementPanel } from "@/components/settings/ProductManagementPanel";
 import { CustomerTagsPanel } from "@/components/settings/CustomerTagsPanel";
 import { CouponsPanel } from "@/components/settings/CouponsPanel";
+import { UpdateSettingsPanel } from "@/components/settings/UpdateSettingsPanel";
 
-type SettingsTab = "general" | "prices" | "products" | "tags" | "coupons" | "help";
+type SettingsTab =
+  | "general"
+  | "prices"
+  | "products"
+  | "tags"
+  | "coupons"
+  | "updates"
+  | "help";
 
 export function SettingsScreen() {
   const { products, servicePrices, refresh } = useCatalog();
@@ -53,6 +61,7 @@ export function SettingsScreen() {
     { id: "products", label: "Ürün Yönetimi" },
     { id: "tags", label: "Müşteri Etiketleri" },
     { id: "coupons", label: "Kuponlar" },
+    { id: "updates", label: "Güncelleme" },
     { id: "help", label: "Yardım & Destek" },
   ];
 
@@ -141,6 +150,8 @@ export function SettingsScreen() {
           <CustomerTagsPanel />
         ) : tab === "coupons" ? (
           <CouponsPanel />
+        ) : tab === "updates" ? (
+          <UpdateSettingsPanel />
         ) : (
           <HelpSection />
         )}

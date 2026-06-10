@@ -8,63 +8,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  findNewerGitHubRelease,
-  RELEASES_PAGE,
-  type RemoteRelease,
-} from "@/lib/github-updater";
+import { RELEASES_PAGE } from "@/lib/github-updater";
+import { openReleasePage, useAppUpdate } from "@/hooks/useAppUpdate";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function openExternalUrl(url: string): Promise<void> {
-  if (isTauri()) {
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
-      return;
-    } catch {
-      /* fallback */
-    }
-  }
-  window.open(url, "_blank", "noopener,noreferrer");
-}
-
 export function UpdateChecker() {
   const [open, setOpen] = useState(false);
-  const [currentVersion, setCurrentVersion] = useState("");
-  const [release, setRelease] = useState<RemoteRelease | null>(null);
-  const [checking, setChecking] = useState(true);
+  const { currentVersion, release, checking, hasUpdate } = useAppUpdate(true);
 
   useEffect(() => {
-    if (!isTauri()) return;
-
-    void (async () => {
-      try {
-        const { getVersion } = await import("@tauri-apps/api/app");
-        const current = await getVersion();
-        setCurrentVersion(current);
-
-        const newer = await findNewerGitHubRelease(current);
-        if (newer) {
-          setRelease(newer);
-          setOpen(true);
-        }
-      } catch (err) {
-        console.debug("Update check skipped:", err);
-      } finally {
-        setChecking(false);
-      }
-    })();
-  }, []);
+    if (!checking && hasUpdate) {
+      setOpen(true);
+    }
+  }, [checking, hasUpdate]);
 
   const handleDownload = () => {
-    const url = release?.releasePageUrl ?? RELEASES_PAGE;
-    void openExternalUrl(url);
+    void openReleasePage(release?.releasePageUrl ?? RELEASES_PAGE);
   };
 
-  if (!isTauri() || checking || !release) return null;
+  if (!isTauri() || checking || !hasUpdate || !release) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
