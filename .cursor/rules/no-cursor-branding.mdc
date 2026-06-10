@@ -1,0 +1,20 @@
+---
+description: Asla Cursor/cursoragent markası commit veya koda eklenmez
+alwaysApply: true
+---
+
+# Cursor Markası Yasak
+
+Kullanıcı hiçbir şekilde Cursor reklamı veya markası istemez.
+
+## Git commit kuralları
+
+- Commit mesajına **asla** şunu ekleme: `Co-authored-by: Cursor <cursoragent@cursor.com>`
+- Commit author olarak `cursoragent`, `Cursor Agent` veya benzeri isimler **kullanma**
+- Bu repo için commit kimliği: **Mike Ross** / **mozkarci1991@gmail.com** (veya `129474467+RealMrNovember@users.noreply.github.com`)
+- Commit oluşturmadan önce mesajda `cursoragent` veya `Co-authored-by: Cursor` olmadığını doğrula
+
+## Kod ve dokümantasyon
+
+- README, UI, yorum veya metadata içine Cursor/agent reklamı ekleme
+- "Powered by Cursor", "Built with Cursor Agent" gibi ifadeler kullanma

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Cursor co-author satırını commit mesajından otomatik kaldır
+if [ -f "$1" ]; then
+  sed -i '/Co-authored-by: Cursor <cursoragent@cursor.com>/d' "$1"
+fi
