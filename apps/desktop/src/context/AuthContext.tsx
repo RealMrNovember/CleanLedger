@@ -13,7 +13,7 @@ import {
 } from "@/lib/auth-api";
 import { ensureLicense, isLicenseUsable } from "@/lib/license-client";
 import { getInstallationId } from "@/lib/installation";
-import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
+import { runSyncPull, initSyncListeners } from "@/lib/sync-service";
 import {
   initDatabase,
   saveOrganizationSettings,
@@ -21,6 +21,7 @@ import {
   type OrganizationInput,
 } from "@/db/client";
 import type { OrganizationSettings } from "@/db/schema";
+import { formatUnknownError } from "@/lib/utils";
 
 const SESSION_KEY = "cleanledger_desktop_session";
 
@@ -60,6 +61,7 @@ interface AuthContextValue {
   token: string | null;
   organization: OrganizationSettings | null;
   loading: boolean;
+  dbError: string | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -126,11 +128,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     null
   );
   const [loading, setLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
         await initDatabase();
+      } catch (err) {
+        setDbError(formatUnknownError(err, "Veritabanı başlatılamadı."));
+        console.error("[CleanLedger] initDatabase failed:", err);
+        return;
+      }
+
+      try {
         const saved = loadSession();
         const restored = saved ? await restoreSession(saved) : null;
 
@@ -147,20 +157,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch {
             /* offline grace: keep session if license check fails */
           }
-          await runSyncPull();
+          try {
+            const pulled = await runSyncPull();
+            if (pulled) {
+              window.dispatchEvent(new Event("cleanledger-sync"));
+            }
+          } catch (err) {
+            console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
+          }
           initSyncListeners(() => {
             window.dispatchEvent(new Event("cleanledger-sync"));
           });
         } else if (saved) {
           await clearAuthState();
         }
-      } finally {
-        setLoading(false);
+      } catch (err) {
+        console.warn("[CleanLedger] Oturum geri yüklenemedi:", err);
+        try {
+          await clearAuthState();
+        } catch (clearErr) {
+          console.warn("[CleanLedger] Oturum temizlenemedi:", clearErr);
+        }
       }
-    })();
+    })().finally(() => {
+      setLoading(false);
+    });
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
+    if (dbError) {
+      throw new Error(`Veritabanı hazır değil: ${dbError}`);
+    }
+
     const next = await loginRemote(email, password);
     if (!isValidSession(next)) {
       throw new Error(
@@ -194,12 +222,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganization(org);
 
     try {
-      await runSyncPull();
+      const pulled = await runSyncPull();
+      if (pulled) {
+        window.dispatchEvent(new Event("cleanledger-sync"));
+      }
     } catch (err) {
       console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
     }
-    void runSyncPush();
-  }, []);
+  }, [dbError]);
 
   const logout = useCallback(async () => {
     await clearAuthState();
@@ -216,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         organization,
         loading,
+        dbError,
         isAuthenticated: Boolean(token && session?.user),
         login,
         logout,

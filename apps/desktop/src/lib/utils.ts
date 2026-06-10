@@ -49,3 +49,22 @@ export function formatCustomerName(customer: {
     .filter(Boolean)
     .join(" ");
 }
+
+/** Tauri invoke ve diğer bilinmeyen hata tiplerinden okunabilir mesaj üretir. */
+export function formatUnknownError(
+  err: unknown,
+  fallback = "Bilinmeyen hata"
+): string {
+  if (typeof err === "string" && err.trim()) return err.trim();
+  if (err instanceof Error && err.message.trim()) return err.message.trim();
+  if (err && typeof err === "object") {
+    const record = err as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message.trim();
+    }
+    if (typeof record.error === "string" && record.error.trim()) {
+      return record.error.trim();
+    }
+  }
+  return fallback;
+}

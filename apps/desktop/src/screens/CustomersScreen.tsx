@@ -67,7 +67,13 @@ export function CustomersScreen() {
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const handler = () => void load();
+    window.addEventListener("cleanledger-sync", handler);
+    return () => window.removeEventListener("cleanledger-sync", handler);
   }, [load]);
 
   const filtered = customers.filter((c) => {

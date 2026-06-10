@@ -27,7 +27,8 @@ import {
 } from "./schema";
 import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
-import { formatCustomerName } from "@/lib/utils";
+import { formatCustomerName, formatUnknownError } from "@/lib/utils";
+import { getSyncUpdatedAt } from "@/lib/sync-meta";
 
 const STORAGE_KEY = "cleanledger_web_db_v2";
 const LEGACY_STORAGE_KEY = "cleanledger_web_db_v1";
@@ -155,7 +156,10 @@ function saveLocalDb(db: LocalDb): void {
 }
 
 function triggerSyncPush(): void {
-  void import("@/lib/sync-service").then((m) => m.scheduleSyncPush());
+  void import("@/lib/sync-service").then((m) => {
+    m.bumpSyncUpdatedAt();
+    m.scheduleSyncPush();
+  });
 }
 
 function isTauri(): boolean {
@@ -172,10 +176,32 @@ type SqlDb = {
 
 let sqlDb: SqlDb | undefined;
 
+async function resetSqliteDatabase(): Promise<void> {
+  sqlDb = undefined;
+  if (!isTauri()) return;
+  try {
+    const { remove, exists, BaseDirectory } = await import(
+      "@tauri-apps/plugin-fs"
+    );
+    if (await exists("cleanledger.db", { baseDir: BaseDirectory.AppConfig })) {
+      await remove("cleanledger.db", { baseDir: BaseDirectory.AppConfig });
+    }
+  } catch (err) {
+    console.warn("[CleanLedger] Veritabanı dosyası sıfırlanamadı:", err);
+  }
+}
+
 async function getSqlDb(): Promise<SqlDb> {
   if (sqlDb) return sqlDb;
   const Database = (await import("@tauri-apps/plugin-sql")).default;
-  const db = await Database.load("sqlite:cleanledger.db");
+  const dbPath = "sqlite:cleanledger.db";
+  // tauri.conf.json preload ile bağlantı kurulur; get() load ACL'ini atlar.
+  let db = Database.get(dbPath);
+  try {
+    await db.select("SELECT 1");
+  } catch {
+    db = await Database.load(dbPath);
+  }
   sqlDb = {
     execute: async (query, bindValues) => {
       const result = await db.execute(query, bindValues);
@@ -698,28 +724,28 @@ async function runMigrations(): Promise<void> {
 
   await db.execute(
     `UPDATE orders SET subtotal_amount = total_amount WHERE subtotal_amount IS NULL OR subtotal_amount = 0`
-  );
+  ).catch(() => undefined);
   await db.execute(
     `UPDATE orders SET amount_paid = total_amount WHERE payment_status = 'paid' AND (amount_paid IS NULL OR amount_paid = 0)`
-  );
+  ).catch(() => undefined);
   await db.execute(
     `UPDATE orders SET balance_due = total_amount - amount_paid WHERE balance_due IS NULL`
-  );
+  ).catch(() => undefined);
 
   const defaultDelivery = toDateKey(addDaysToDate(new Date(), 3));
   await db.execute(
     `UPDATE orders SET delivery_date = ? WHERE delivery_date IS NULL OR delivery_date = ''`,
     [defaultDelivery]
-  );
+  ).catch(() => undefined);
   await db.execute(
     `UPDATE orders SET order_status = 'preparing' WHERE order_status IS NULL OR order_status = '' OR order_status = 'received'`
-  );
+  ).catch(() => undefined);
   await db.execute(
     `UPDATE orders SET payment_status = 'unpaid' WHERE payment_status IS NULL OR payment_status = ''`
-  );
+  ).catch(() => undefined);
   await db.execute(
     `UPDATE orders SET priority = 'normal' WHERE priority IS NULL OR priority = ''`
-  );
+  ).catch(() => undefined);
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS order_payments (
@@ -733,20 +759,27 @@ async function runMigrations(): Promise<void> {
     )
   `);
 
-  const ordersNeedingPayments = await db.select<{
-    id: number;
-    amount_paid: number;
-    payment_method: string;
-    created_at: string;
-  }>(
-    `SELECT o.id, o.amount_paid, o.payment_method, o.created_at
+  const ordersNeedingPayments = await db
+    .select<{
+      id: number;
+      amount_paid: number;
+      payment_method: string;
+      created_at: string;
+    }>(
+      `SELECT o.id, o.amount_paid, o.payment_method, o.created_at
      FROM orders o
      WHERE o.amount_paid > 0
        AND NOT EXISTS (
          SELECT 1 FROM order_payments p
          WHERE p.order_id = o.id AND p.refunded = 0
        )`
-  );
+    )
+    .catch(() => [] as Array<{
+      id: number;
+      amount_paid: number;
+      payment_method: string;
+      created_at: string;
+    }>);
   for (const row of ordersNeedingPayments) {
     await db.execute(
       `INSERT INTO order_payments (order_id, amount, payment_method, created_at, refunded)
@@ -853,8 +886,26 @@ async function seedAll(): Promise<void> {
 }
 
 export async function initDatabase(): Promise<void> {
-  if (isTauri()) await runMigrations();
-  await seedAll();
+  if (!isTauri()) {
+    await seedAll();
+    return;
+  }
+
+  try {
+    await runMigrations();
+    await seedAll();
+  } catch (firstErr) {
+    console.error("[CleanLedger] Veritabanı başlatma hatası, yeniden deneniyor:", firstErr);
+    await resetSqliteDatabase();
+    try {
+      await runMigrations();
+      await seedAll();
+    } catch (retryErr) {
+      throw new Error(
+        formatUnknownError(retryErr, "Veritabanı başlatılamadı.")
+      );
+    }
+  }
 }
 
 export async function getProducts(): Promise<Product[]> {
@@ -1972,9 +2023,9 @@ export async function saveOrganizationSettings(
 ): Promise<OrganizationSettings> {
   const updatedAt = new Date().toISOString();
   const row = {
-    companyName: input.companyName.trim(),
-    adminName: input.adminName.trim(),
-    email: input.email.trim(),
+    companyName: (input.companyName ?? "").trim(),
+    adminName: (input.adminName ?? "").trim(),
+    email: (input.email ?? "").trim(),
     authToken: input.authToken,
     trialEndsAt: input.trialEndsAt ?? "",
     updatedAt,
@@ -2577,7 +2628,7 @@ export async function exportDatabaseSnapshot(): Promise<DatabaseSnapshot> {
   const data = isTauri() ? await buildLocalDbFromTauri() : loadLocalDb();
   return {
     version: 2,
-    updatedAt: new Date().toISOString(),
+    updatedAt: getSyncUpdatedAt() ?? new Date().toISOString(),
     data,
   };
 }
@@ -2590,7 +2641,6 @@ export async function importDatabaseSnapshot(
   );
   if (isTauri()) {
     await applyLocalDbToTauri(data);
-    triggerSyncPush();
     return;
   }
   saveLocalDb(data);
