@@ -11,7 +11,13 @@ import {
   loginRemote,
   fetchProfileRemote,
 } from "@/lib/auth-api";
-import { ensureLicense, isLicenseUsable } from "@/lib/license-client";
+import {
+  clearLicenseCache,
+  ensureLicense,
+  isLicenseUsable,
+  type LicenseContext,
+  type LicenseSnapshot,
+} from "@/lib/license-client";
 import { getInstallationId } from "@/lib/installation";
 import { runSyncPull, initSyncListeners } from "@/lib/sync-service";
 import {
@@ -24,6 +30,7 @@ import type { OrganizationSettings } from "@/db/schema";
 import { formatUnknownError } from "@/lib/utils";
 
 const SESSION_KEY = "cleanledger_desktop_session";
+const LICENSE_REFRESH_MS = 5 * 60 * 1000;
 
 function loadSession(): AuthSession | null {
   try {
@@ -53,6 +60,7 @@ function isValidSession(session: AuthSession | null): session is AuthSession {
 
 async function clearAuthState(): Promise<void> {
   persistSession(null);
+  clearLicenseCache();
   await clearOrganizationSettings();
 }
 
@@ -60,10 +68,13 @@ interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   organization: OrganizationSettings | null;
+  license: LicenseSnapshot | null;
+  licenseUsable: boolean;
   loading: boolean;
   dbError: string | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  refreshLicense: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -89,14 +100,14 @@ async function syncOrganization(
   return saveOrganizationSettings(input);
 }
 
-async function verifyLicense(): Promise<void> {
-  const hwid = getInstallationId();
-  const license = await ensureLicense(hwid);
-  if (!isLicenseUsable(license)) {
-    throw new Error(
-      "Lisansınız aktif değil veya süresi dolmuş. Lütfen Cicibyte ile iletişime geçin."
-    );
-  }
+function licenseContextFromSession(
+  session: AuthSession | null
+): LicenseContext | undefined {
+  if (!session?.user) return undefined;
+  return {
+    email: session.user.email,
+    clientName: session.user.companyName,
+  };
 }
 
 async function restoreSession(
@@ -127,8 +138,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [organization, setOrganization] = useState<OrganizationSettings | null>(
     null
   );
+  const [license, setLicense] = useState<LicenseSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
+
+  const syncLicense = useCallback(async (activeSession: AuthSession | null) => {
+    if (!activeSession?.user) {
+      setLicense(null);
+      return;
+    }
+
+    const snapshot = await ensureLicense(
+      getInstallationId(),
+      licenseContextFromSession(activeSession)
+    );
+    setLicense(snapshot);
+  }, []);
+
+  const refreshLicense = useCallback(async () => {
+    await syncLicense(session ?? loadSession());
+  }, [session, syncLicense]);
 
   useEffect(() => {
     void (async () => {
@@ -152,11 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           setSession(restored);
           setOrganization(org);
-          try {
-            await verifyLicense();
-          } catch {
-            /* offline grace: keep session if license check fails */
-          }
+          await syncLicense(restored);
           try {
             const pulled = await runSyncPull();
             if (pulled) {
@@ -182,62 +207,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })().finally(() => {
       setLoading(false);
     });
-  }, []);
+  }, [syncLicense]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    if (dbError) {
-      throw new Error(`Veritabanı hazır değil: ${dbError}`);
-    }
+  useEffect(() => {
+    if (!session?.token) return;
 
-    const next = await loginRemote(email, password);
-    if (!isValidSession(next)) {
-      throw new Error(
-        "Sunucu geçersiz oturum döndürdü. Hesap bilgileriniz eksik olabilir; destek ile iletişime geçin."
-      );
-    }
+    const syncInterval = window.setInterval(() => {
+      void syncLicense(session);
+    }, LICENSE_REFRESH_MS);
 
-    try {
-      await verifyLicense();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Lisans doğrulaması başarısız.";
-      console.warn("[CleanLedger] Lisans doğrulaması atlandı:", message);
-    }
+    const handleFocus = () => {
+      void syncLicense(session);
+    };
+    window.addEventListener("focus", handleFocus);
 
-    persistSession(next);
+    return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [session, syncLicense]);
 
-    let org: OrganizationSettings;
-    try {
-      org = await syncOrganization(next);
-    } catch (err) {
-      persistSession(null);
-      throw new Error(
-        err instanceof Error
-          ? `Giriş sonrası yerel kayıt başarısız: ${err.message}`
-          : "Giriş sonrası yerel kayıt başarısız."
-      );
-    }
-
-    setSession(next);
-    setOrganization(org);
-
-    try {
-      const pulled = await runSyncPull();
-      if (pulled) {
-        window.dispatchEvent(new Event("cleanledger-sync"));
+  const login = useCallback(
+    async (email: string, password: string) => {
+      if (dbError) {
+        throw new Error(`Veritabanı hazır değil: ${dbError}`);
       }
-    } catch (err) {
-      console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
-    }
-  }, [dbError]);
+
+      const next = await loginRemote(email, password);
+      if (!isValidSession(next)) {
+        throw new Error(
+          "Sunucu geçersiz oturum döndürdü. Hesap bilgileriniz eksik olabilir; destek ile iletişime geçin."
+        );
+      }
+
+      clearLicenseCache();
+      persistSession(next);
+
+      let org: OrganizationSettings;
+      try {
+        org = await syncOrganization(next);
+      } catch (err) {
+        persistSession(null);
+        throw new Error(
+          err instanceof Error
+            ? `Giriş sonrası yerel kayıt başarısız: ${err.message}`
+            : "Giriş sonrası yerel kayıt başarısız."
+        );
+      }
+
+      await syncLicense(next);
+      setSession(next);
+      setOrganization(org);
+
+      try {
+        const pulled = await runSyncPull();
+        if (pulled) {
+          window.dispatchEvent(new Event("cleanledger-sync"));
+        }
+      } catch (err) {
+        console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
+      }
+    },
+    [dbError, syncLicense]
+  );
 
   const logout = useCallback(async () => {
     await clearAuthState();
     setSession(null);
     setOrganization(null);
+    setLicense(null);
   }, []);
 
   const token = session?.token?.trim() ?? null;
+  const licenseUsable = Boolean(token && session?.user) && isLicenseUsable(license);
 
   return (
     <AuthContext.Provider
@@ -245,10 +287,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user: token ? (session?.user ?? null) : null,
         token,
         organization,
+        license,
+        licenseUsable,
         loading,
         dbError,
         isAuthenticated: Boolean(token && session?.user),
         login,
+        refreshLicense,
         logout,
       }}
     >

@@ -19,6 +19,7 @@ export interface SignupInput {
   email: string;
   city: string;
   password: string;
+  logoDataUrl?: string;
 }
 
 const SESSION_KEY = "cleanledger_session";

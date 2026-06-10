@@ -4,6 +4,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { SignupPage } from "@/pages/SignupPage";
 import { AccountPage } from "@/pages/AccountPage";
 import { ProtectedRoute, GuestRoute } from "@/components/ProtectedRoute";
+import { LicenseGate } from "@/components/LicenseGate";
 import { WebAppLayout } from "@/components/layout/WebAppLayout";
 import { CatalogProvider } from "@/hooks/useCatalog";
 import { SyncProvider } from "@/context/SyncContext";
@@ -23,15 +24,16 @@ export default function App() {
         <Route path="/signup" element={<SignupPage />} />
       </Route>
       <Route element={<ProtectedRoute />}>
-        <Route
-          element={
-            <SyncProvider>
-              <CatalogProvider>
-                <WebAppLayout />
-              </CatalogProvider>
-            </SyncProvider>
-          }
-        >
+        <Route element={<LicenseGate />}>
+          <Route
+            element={
+              <SyncProvider>
+                <CatalogProvider>
+                  <WebAppLayout />
+                </CatalogProvider>
+              </SyncProvider>
+            }
+          >
           <Route path="/dashboard" element={<Navigate to="/dashboard/pos" replace />} />
           <Route path="/dashboard/pos" element={<PosScreen />} />
           <Route path="/dashboard/orders" element={<OrdersTrackingScreen />} />
@@ -40,6 +42,7 @@ export default function App() {
           <Route path="/dashboard/reports" element={<ReportsScreen />} />
           <Route path="/dashboard/settings" element={<SettingsScreen />} />
           <Route path="/dashboard/account" element={<AccountPage />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

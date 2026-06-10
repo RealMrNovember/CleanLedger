@@ -90,20 +90,122 @@
 }
 
 .field-input {
-  height: 3rem;
+  height: 2.75rem;
   width: 100%;
   border-radius: 0.75rem;
   border: 2px solid #e2e8f0;
-  background: var(--color-surface);
-  padding-left: 3rem;
+  background: #ffffff;
+  color: #1e293b;
+  padding-left: 2.75rem;
   padding-right: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field-input::placeholder {
+  color: #94a3b8;
 }
 
 .field-input:focus {
   border-color: #4ecdc4;
   box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.2);
+}
+
+.dark .field-input {
+  border-color: #475569;
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+.dark .field-input::placeholder {
+  color: #64748b;
+}
+
+.dark .field-input:focus {
+  border-color: #4ecdc4;
+  box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.25);
+}
+
+.field-input:-webkit-autofill,
+.field-input:-webkit-autofill:hover,
+.field-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1e293b;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+  caret-color: #1e293b;
+}
+
+.dark .field-input:-webkit-autofill,
+.dark .field-input:-webkit-autofill:hover,
+.dark .field-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f1f5f9;
+  box-shadow: 0 0 0 1000px #1e293b inset;
+  caret-color: #f1f5f9;
+}
+
+/* Kayıt / giriş — panel koyu modundan bağımsız, her zaman açık ve okunaklı */
+.auth-shell {
+  background-color: #f8fafb;
+  color: #1e293b;
+}
+
+.auth-shell .auth-heading {
+  color: #0f172a;
+}
+
+.auth-shell .auth-subtitle,
+.auth-shell .auth-footer-text {
+  color: #64748b;
+}
+
+.auth-shell .auth-card {
+  border-color: #e2e8f0;
+  background-color: #ffffff;
+}
+
+.auth-shell .auth-label {
+  color: #1e293b;
+}
+
+.auth-shell .field-input {
+  border-color: #e2e8f0;
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+.auth-shell .field-input::placeholder {
+  color: #94a3b8;
+}
+
+.auth-shell .field-input:-webkit-autofill,
+.auth-shell .field-input:-webkit-autofill:hover,
+.auth-shell .field-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1e293b;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+}
+
+.auth-shell footer {
+  border-color: #e2e8f0;
+  background-color: #ffffff;
+  color: #64748b;
+}
+
+.auth-shell footer .text-muted {
+  color: #64748b;
+}
+
+.auth-shell header {
+  border-color: #e2e8f0;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.auth-shell header a.text-ink {
+  color: #1e293b;
+}
+
+.auth-shell header a.text-ink:hover {
+  background-color: #f1f5f9;
 }
 
 /* POS panel resize — touch-friendly without breaking layout */

@@ -7,6 +7,7 @@ import {
   GuestRoute,
   RootRedirect,
 } from "@/components/auth/AuthGuard";
+import { LicenseGate } from "@/components/LicenseGate";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginScreen } from "@/screens/LoginScreen";
 import { PosScreen } from "@/screens/PosScreen";
@@ -27,7 +28,8 @@ export default function App() {
                 <Route path="/login" element={<LoginScreen />} />
               </Route>
               <Route element={<ProtectedRoute />}>
-                <Route element={<AppLayout />}>
+                <Route element={<LicenseGate />}>
+                  <Route element={<AppLayout />}>
                   <Route path="/" element={<PosScreen />} />
                   <Route path="/orders" element={<OrdersTrackingScreen />} />
                   <Route path="/reports" element={<ReportsScreen />} />
@@ -37,6 +39,7 @@ export default function App() {
                     element={<CustomerDetailScreen />}
                   />
                   <Route path="/settings" element={<SettingsScreen />} />
+                  </Route>
                 </Route>
               </Route>
               <Route path="*" element={<RootRedirect />} />

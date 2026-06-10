@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { LogoUploadField } from "@/components/settings/LogoUploadField";
+import { scheduleSyncPush } from "@/lib/sync-service";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "system", label: "Sistem" },
@@ -36,6 +38,7 @@ export function GeneralSettingsPanel() {
       return;
     }
     saveShopProfile(form);
+    scheduleSyncPush();
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -76,7 +79,15 @@ export function GeneralSettingsPanel() {
           </div>
         </div>
 
-        <div className="border-t border-border/60 pt-4">
+        <LogoUploadField
+          className="border-t border-border/60 pt-4"
+          value={form.logoDataUrl}
+          onChange={(logoDataUrl) => setForm((f) => ({ ...f, logoDataUrl }))}
+          label="Firma Logosu"
+          hint="Fişlerin üstünde görünür. Boş bırakırsanız yalnızca dükkan adı yazdırılır."
+        />
+
+        <div>
           <label className="mb-1 block text-sm font-medium">Dükkan Adı</label>
           <Input
             value={form.companyName}

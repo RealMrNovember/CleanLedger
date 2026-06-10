@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/brand/Logo";
 import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import {
   buildReceiptSummaryRows,
@@ -79,9 +78,15 @@ export function ReceiptPrintDialog({
           style={{ fontFamily: '"Segoe UI", system-ui, sans-serif' }}
         >
           <div className="border-b border-black/15 pb-3 text-center">
-            <div className="receipt-logo-wrap mb-3 flex justify-center">
-              <Logo size="sm" showText className="flex-col items-center gap-1" />
-            </div>
+            {shop.logoDataUrl && (
+              <div className="receipt-logo-wrap mb-3 flex justify-center">
+                <img
+                  src={shop.logoDataUrl}
+                  alt=""
+                  className="max-h-16 max-w-[200px] object-contain"
+                />
+              </div>
+            )}
             <p className="text-base font-bold uppercase tracking-wide">
               {shop.companyName}
             </p>
@@ -135,8 +140,8 @@ export function ReceiptPrintDialog({
             <p className="pt-2 text-center text-xs">
               {PAYMENT_STATUS_LABELS[receipt.order.paymentStatus as PaymentStatus]}
             </p>
-            <p className="pt-2 text-center text-[10px] font-semibold uppercase tracking-widest text-black/60">
-              Cicibyte · CleanLedger
+            <p className="pt-2 text-center text-[10px] font-semibold tracking-wide text-black/60">
+              CleanLedger
             </p>
           </div>
         </div>

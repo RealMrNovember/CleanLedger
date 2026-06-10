@@ -18,16 +18,18 @@ import {
 import {
   ensureLicense,
   getInstallationId,
-  getLicenseCache,
   clearLicenseCache,
+  isLicenseUsable,
   type LicenseSnapshot,
 } from "@/lib/license-client";
 import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
+import { saveShopProfile } from "@/lib/shop-profile";
 
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   license: LicenseSnapshot | null;
+  licenseUsable: boolean;
   loading: boolean;
   signup: (input: SignupInput) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
@@ -37,6 +39,8 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const LICENSE_REFRESH_MS = 5 * 60 * 1000;
 
 function licenseContextFromSession(session: AuthSession | null) {
   if (!session?.user) return undefined;
@@ -57,15 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    try {
-      const snapshot = await ensureLicense(
-        getInstallationId(),
-        licenseContextFromSession(activeSession)
-      );
-      setLicense(snapshot);
-    } catch {
-      setLicense(getLicenseCache());
-    }
+    const snapshot = await ensureLicense(
+      getInstallationId(),
+      licenseContextFromSession(activeSession)
+    );
+    setLicense(snapshot);
   }, []);
 
   const refreshLicense = useCallback(async () => {
@@ -80,22 +80,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!session?.token) return;
+
     void runSyncPull().then((changed) => {
       if (changed) window.dispatchEvent(new Event("cleanledger-sync"));
     });
-    return initSyncListeners(() => {
+
+    const syncInterval = window.setInterval(() => {
+      void syncLicense(session);
+    }, LICENSE_REFRESH_MS);
+
+    const handleFocus = () => {
+      void syncLicense(session);
+    };
+    window.addEventListener("focus", handleFocus);
+
+    const removeSyncListeners = initSyncListeners(() => {
       window.dispatchEvent(new Event("cleanledger-sync"));
     });
-  }, [session?.token]);
+
+    return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener("focus", handleFocus);
+      removeSyncListeners();
+    };
+  }, [session, syncLicense]);
 
   const signup = useCallback(
     async (input: SignupInput) => {
+      clearLicenseCache();
       const s = await apiSignup(input);
-      try {
-        await syncLicense(s);
-      } catch {
-        /* signup still succeeds */
-      }
+      saveShopProfile({
+        companyName: input.companyName.trim(),
+        phone: input.phone.trim(),
+        email: input.email.trim(),
+        logoDataUrl: input.logoDataUrl,
+      });
+      await syncLicense(s);
       setSession(s);
       await runSyncPull();
       void runSyncPush();
@@ -105,12 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
+      clearLicenseCache();
       const s = await apiLogin(email, password);
-      try {
-        await syncLicense(s);
-      } catch {
-        /* keep login if license server unreachable */
-      }
+      await syncLicense(s);
       setSession(s);
       await runSyncPull();
       void runSyncPush();
@@ -141,12 +158,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLicense(null);
   }, []);
 
+  const licenseUsable = Boolean(session?.user) && isLicenseUsable(license);
+
   return (
     <AuthContext.Provider
       value={{
         user: session?.user ?? null,
         token: session?.token ?? null,
         license,
+        licenseUsable,
         loading,
         signup,
         login,

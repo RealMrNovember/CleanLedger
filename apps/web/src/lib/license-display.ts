@@ -1,4 +1,5 @@
 import type { LicenseSnapshot } from "@/lib/license-client";
+import { isLicenseUsable } from "@/lib/license-client";
 
 export interface LicenseDisplay {
   label: string;
@@ -7,8 +8,12 @@ export interface LicenseDisplay {
 }
 
 export function getLicenseDisplay(snapshot: LicenseSnapshot | null): LicenseDisplay {
-  if (!snapshot || !["active", "trial"].includes(snapshot.status)) {
+  if (!snapshot) {
     return { label: "Lisans: Yok", tone: "inactive" };
+  }
+
+  if (!isLicenseUsable(snapshot)) {
+    return { label: "Lisans: Süresi Doldu", tone: "inactive" };
   }
 
   switch (snapshot.type) {
