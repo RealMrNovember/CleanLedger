@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AuthSession, AuthUser, SignupInput } from "@/lib/auth-api";
+import type { AuthSession, SignupInput } from "@/lib/auth-api";
 import {
   getSession,
   clearSession,
@@ -26,7 +26,7 @@ import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service"
 import { saveShopProfile } from "@/lib/shop-profile";
 
 interface AuthContextValue {
-  user: AuthUser | null;
+  user: AuthSession["user"] | null;
   token: string | null;
   license: LicenseSnapshot | null;
   licenseUsable: boolean;

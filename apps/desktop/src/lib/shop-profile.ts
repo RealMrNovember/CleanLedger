@@ -6,7 +6,6 @@ export interface ShopProfile {
   companyName: string;
   phone: string;
   email: string;
-  logoDataUrl?: string;
 }
 
 function getSessionUser(): { companyName: string; phone: string; email: string } | null {
@@ -36,7 +35,6 @@ export function getShopProfile(): ShopProfile {
           "CleanLedger",
         phone: parsed.phone?.trim() || auth?.phone?.trim() || "",
         email: parsed.email?.trim() || auth?.email?.trim() || "",
-        logoDataUrl: parsed.logoDataUrl,
       };
     }
   } catch {
@@ -58,20 +56,15 @@ export function getShopProfile(): ShopProfile {
   };
 }
 
-function normalizeProfile(profile: ShopProfile): ShopProfile {
-  const normalized: ShopProfile = {
-    companyName: profile.companyName.trim(),
-    phone: profile.phone.trim(),
-    email: profile.email.trim(),
-  };
-  if (profile.logoDataUrl) {
-    normalized.logoDataUrl = profile.logoDataUrl;
-  }
-  return normalized;
-}
-
 export function saveShopProfile(profile: ShopProfile): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeProfile(profile)));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      companyName: profile.companyName.trim(),
+      phone: profile.phone.trim(),
+      email: profile.email.trim(),
+    })
+  );
 }
 
 export function shopProfileToContact(profile: ShopProfile): ShopContactInfo {
@@ -79,6 +72,5 @@ export function shopProfileToContact(profile: ShopProfile): ShopContactInfo {
     companyName: profile.companyName || "CleanLedger",
     phone: profile.phone || undefined,
     email: profile.email || undefined,
-    logoDataUrl: profile.logoDataUrl,
   };
 }

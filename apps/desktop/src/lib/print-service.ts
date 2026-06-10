@@ -6,7 +6,6 @@ export interface ShopContactInfo {
   phone?: string;
   email?: string;
   address?: string;
-  logoDataUrl?: string;
 }
 
 export const DEFAULT_SHOP_CONTACT: ShopContactInfo = {

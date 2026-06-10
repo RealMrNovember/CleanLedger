@@ -210,17 +210,77 @@ export function CustomerPanel({
           </div>
         )}
 
+        {creditDebt > 0 && (
+          <div className="shrink-0 rounded-2xl border-2 border-red-300 bg-red-50 p-3 text-center shadow-sm dark:border-red-900 dark:bg-red-950/40">
+            <AlertTriangle className="mx-auto mb-1 size-6 text-red-600" />
+            <p className="text-sm font-bold text-red-700 dark:text-red-400">
+              Müşterinin {formatCurrency(creditDebt)} Borcu Var!
+            </p>
+          </div>
+        )}
+
+        <div className="shrink-0 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <CalendarDays className="size-4 text-mint" />
+            Teslim Tarihi
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "Bugün", value: today },
+              { label: "Yarın", value: tomorrow },
+              { label: "+3 Gün", value: dayAfter },
+            ].map((opt) => (
+              <Button
+                key={opt.value}
+                type="button"
+                variant={deliveryDate === opt.value ? "default" : "outline"}
+                size="sm"
+                className="h-10 text-xs"
+                onClick={() => onDeliveryDateChange(opt.value)}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
+          <Input
+            type="date"
+            value={deliveryDate}
+            onChange={(e) => onDeliveryDateChange(e.target.value)}
+            className="h-11"
+          />
+          <p className="text-sm font-medium text-foreground">
+            {formatDate(new Date(deliveryDate + "T12:00:00"))}
+          </p>
+        </div>
+
+        <div className="shrink-0 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Zap className="size-4 text-[#e85d04]" />
+            Öncelik
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["normal", "urgent"] as OrderPriority[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => onPriorityChange(p)}
+                className={cn(
+                  "rounded-xl py-3 text-sm font-semibold transition",
+                  priority === p
+                    ? p === "urgent"
+                      ? "bg-gradient-to-r from-[#e85d04] to-[#f48c06] text-white shadow-md ring-2 ring-[#e85d04]/40"
+                      : "bg-muted text-foreground ring-2 ring-border"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                )}
+              >
+                {p === "urgent" ? "ACİL" : ORDER_PRIORITY_LABELS[p]}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {showDetails && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/10">
-            {creditDebt > 0 && (
-              <div className="shrink-0 border-b border-red-200 bg-red-50 p-3 text-center dark:border-red-900 dark:bg-red-950/40">
-                <AlertTriangle className="mx-auto mb-1 size-5 text-red-600" />
-                <p className="text-sm font-bold text-red-700 dark:text-red-400">
-                  {formatCurrency(creditDebt)} borç
-                </p>
-              </div>
-            )}
-
             <div className="flex shrink-0 border-b border-border/50">
               <button
                 type="button"
@@ -271,66 +331,11 @@ export function CustomerPanel({
                       placeholder="Soyad (opsiyonel)"
                       className="h-10"
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <CalendarDays className="size-3.5 text-mint" />
-                      Teslim Tarihi
-                    </label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {[
-                        { label: "Bugün", value: today },
-                        { label: "Yarın", value: tomorrow },
-                        { label: "+3 Gün", value: dayAfter },
-                      ].map((opt) => (
-                        <Button
-                          key={opt.value}
-                          type="button"
-                          variant={deliveryDate === opt.value ? "default" : "outline"}
-                          size="sm"
-                          className="h-8 text-[10px] sm:text-xs"
-                          onClick={() => onDeliveryDateChange(opt.value)}
-                        >
-                          {opt.label}
-                        </Button>
-                      ))}
-                    </div>
-                    <Input
-                      type="date"
-                      value={deliveryDate}
-                      onChange={(e) => onDeliveryDateChange(e.target.value)}
-                      className="h-9"
-                    />
-                    <p className="text-xs font-medium">
-                      {formatDate(new Date(deliveryDate + "T12:00:00"))}
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <Zap className="size-3.5 text-[#e85d04]" />
-                      Öncelik
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {(["normal", "urgent"] as OrderPriority[]).map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => onPriorityChange(p)}
-                          className={cn(
-                            "rounded-lg py-2 text-xs font-semibold transition",
-                            priority === p
-                              ? p === "urgent"
-                                ? "bg-gradient-to-r from-[#e85d04] to-[#f48c06] text-white shadow-sm"
-                                : "bg-muted text-foreground ring-1 ring-border"
-                              : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                          )}
-                        >
-                          {p === "urgent" ? "ACİL" : ORDER_PRIORITY_LABELS[p]}
-                        </button>
-                      ))}
-                    </div>
+                    {isRegistered && firstName && (
+                      <p className="text-xs text-mint">
+                        Kayıtlı müşteri — bilgileri güncelleyebilirsiniz.
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (

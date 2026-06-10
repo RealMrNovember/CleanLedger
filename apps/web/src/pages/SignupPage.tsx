@@ -12,14 +12,12 @@ import {
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { useAuth } from "@/context/AuthContext";
-import { LogoUploadField } from "@/components/settings/LogoUploadField";
 
 export function SignupPage() {
   const navigate = useNavigate();
   const { signup } = useAuth();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [logoDataUrl, setLogoDataUrl] = useState<string | undefined>();
   const [form, setForm] = useState({
     companyName: "",
     ownerName: "",
@@ -46,7 +44,7 @@ export function SignupPage() {
 
     setSubmitting(true);
     try {
-      await signup({ ...form, logoDataUrl });
+      await signup(form);
       navigate("/dashboard/pos", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kayıt başarısız.");
@@ -59,22 +57,20 @@ export function SignupPage() {
     setForm((f) => ({ ...f, [key]: value }));
 
   return (
-    <div className="auth-shell flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-surface">
       <Navbar />
 
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-lg">
           <div className="mb-8 text-center">
-            <h1 className="auth-heading text-2xl font-bold">
-              Ücretsiz Hesap Oluşturun
-            </h1>
-            <p className="auth-subtitle mt-2">
+            <h1 className="text-2xl font-bold">Ücretsiz Hesap Oluşturun</h1>
+            <p className="mt-2 text-muted">
               14 günlük deneme sürümü otomatik başlar — kredi kartı gerekmez
             </p>
           </div>
 
           <form
-            className="auth-card rounded-2xl border p-8 shadow-sm"
+            className="rounded-2xl border border-slate-200/80 bg-white p-8 shadow-sm"
             onSubmit={(e) => void handleSubmit(e)}
             noValidate
           >
@@ -138,12 +134,6 @@ export function SignupPage() {
               />
             </div>
 
-            <LogoUploadField
-              className="mt-5"
-              value={logoDataUrl}
-              onChange={setLogoDataUrl}
-            />
-
             <button
               type="submit"
               disabled={submitting}
@@ -153,7 +143,7 @@ export function SignupPage() {
               {submitting ? "Kaydediliyor..." : "14 Gün Ücretsiz Başla"}
             </button>
 
-            <p className="auth-footer-text mt-6 text-center text-sm">
+            <p className="mt-6 text-center text-sm text-muted">
               Zaten hesabınız var mı?{" "}
               <Link to="/login" className="font-semibold text-trust hover:underline">
                 Giriş yapın
@@ -189,18 +179,18 @@ function InputField({
 }) {
   return (
     <div className={className}>
-      <label className="auth-label mb-2 block text-sm font-medium">
+      <label className="mb-2 block text-sm font-medium text-ink">
         {label}
         {required && <span className="text-red-500"> *</span>}
       </label>
       <div className="relative">
-        <Icon className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Icon className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" />
         <input
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="field-input"
+          className="h-11 w-full rounded-xl border-2 border-slate-200 bg-surface pl-11 pr-4 text-sm outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20"
         />
       </div>
     </div>

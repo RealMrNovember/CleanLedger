@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import {
-  LayoutGrid,
   Settings,
   ShoppingCart,
   ClipboardList,
@@ -18,9 +17,8 @@ import { Logo } from "@/components/brand/Logo";
 import { SidebarNav } from "@/components/layout/SidebarNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
+import { LicenseBadge } from "@/components/license/LicenseBadge";
 import { useAuth } from "@/context/AuthContext";
-import { LicenseBadge } from "@/components/LicenseBadge";
-import type { LicenseSnapshot } from "@/lib/license-client";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
@@ -43,12 +41,10 @@ function SidebarContent({
   collapsed,
   onNavigate,
   onLogout,
-  license,
 }: {
   collapsed: boolean;
   onNavigate?: () => void;
   onLogout: () => void;
-  license: LicenseSnapshot | null;
 }) {
   return (
     <>
@@ -62,13 +58,7 @@ function SidebarContent({
       </div>
       <SidebarNav items={navItems} collapsed={collapsed} onNavigate={onNavigate} />
       <div className="space-y-2 border-t border-border/60 p-2">
-        {!collapsed && (
-          <div className="flex items-center gap-2 rounded-xl bg-trust-light/50 px-3 py-2 text-xs text-trust">
-            <LayoutGrid className="size-4 shrink-0" />
-            <span>Web POS — tarayıcıda</span>
-          </div>
-        )}
-        <LicenseBadge license={license} compact={collapsed} />
+        <LicenseBadge collapsed={collapsed} />
         <Button
           variant="ghost"
           size="sm"
@@ -88,7 +78,7 @@ function SidebarContent({
 }
 
 export function WebAppLayout() {
-  const { user, license, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -107,11 +97,7 @@ export function WebAppLayout() {
           collapsed ? "w-[4.5rem]" : "w-56"
         )}
       >
-        <SidebarContent
-          collapsed={collapsed}
-          onLogout={handleLogout}
-          license={license}
-        />
+        <SidebarContent collapsed={collapsed} onLogout={handleLogout} />
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
@@ -153,7 +139,6 @@ export function WebAppLayout() {
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
               onLogout={handleLogout}
-              license={license}
             />
           </aside>
         </div>

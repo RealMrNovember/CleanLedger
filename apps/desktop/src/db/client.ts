@@ -29,11 +29,6 @@ import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
 import { formatCustomerName, formatUnknownError } from "@/lib/utils";
 import { getSyncUpdatedAt } from "@/lib/sync-meta";
-import {
-  getShopProfile,
-  saveShopProfile,
-  type ShopProfile,
-} from "@/lib/shop-profile";
 
 const STORAGE_KEY = "cleanledger_web_db_v2";
 const LEGACY_STORAGE_KEY = "cleanledger_web_db_v1";
@@ -2471,7 +2466,6 @@ export interface DatabaseSnapshot {
   version: 2;
   updatedAt: string;
   data: LocalDb;
-  shopProfile?: ShopProfile;
 }
 
 async function buildLocalDbFromTauri(): Promise<LocalDb> {
@@ -2636,7 +2630,6 @@ export async function exportDatabaseSnapshot(): Promise<DatabaseSnapshot> {
     version: 2,
     updatedAt: getSyncUpdatedAt() ?? new Date().toISOString(),
     data,
-    shopProfile: getShopProfile(),
   };
 }
 
@@ -2646,9 +2639,6 @@ export async function importDatabaseSnapshot(
   const data = migrateLegacyDb(
     snapshot.data as unknown as Record<string, unknown>
   );
-  if (snapshot.shopProfile) {
-    saveShopProfile(snapshot.shopProfile);
-  }
   if (isTauri()) {
     await applyLocalDbToTauri(data);
     return;

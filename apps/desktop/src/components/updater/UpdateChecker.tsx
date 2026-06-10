@@ -8,6 +8,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RELEASES_PAGE } from "@/lib/github-updater";
+import { openReleasePage, useAppUpdate } from "@/hooks/useAppUpdate";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -15,54 +17,19 @@ function isTauri(): boolean {
 
 export function UpdateChecker() {
   const [open, setOpen] = useState(false);
-  const [currentVersion, setCurrentVersion] = useState("");
-  const [newVersion, setNewVersion] = useState("");
-  const [installing, setInstalling] = useState(false);
-  const [checked, setChecked] = useState(false);
+  const { currentVersion, release, checking, hasUpdate } = useAppUpdate(true);
 
   useEffect(() => {
-    if (!isTauri()) return;
-
-    void (async () => {
-      try {
-        const { getVersion } = await import("@tauri-apps/api/app");
-        const current = await getVersion();
-        setCurrentVersion(current);
-
-        const { check } = await import("@tauri-apps/plugin-updater");
-        const update = await check();
-        if (update) {
-          setNewVersion(update.version);
-          setOpen(true);
-        }
-      } catch (err) {
-        console.debug("Updater check skipped:", err);
-      } finally {
-        setChecked(true);
-      }
-    })();
-  }, []);
-
-  const handleInstall = async () => {
-    if (!isTauri()) return;
-    setInstalling(true);
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (update) {
-        await update.downloadAndInstall();
-        const { relaunch } = await import("@tauri-apps/plugin-process");
-        await relaunch();
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Güncelleme yüklenemedi. Lütfen daha sonra tekrar deneyin.");
-    } finally {
-      setInstalling(false);
+    if (!checking && hasUpdate) {
+      setOpen(true);
     }
+  }, [checking, hasUpdate]);
+
+  const handleDownload = () => {
+    void openReleasePage(release?.releasePageUrl ?? RELEASES_PAGE);
   };
 
-  if (!isTauri() || !checked) return null;
+  if (!isTauri() || checking || !hasUpdate || !release) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -75,31 +42,29 @@ export function UpdateChecker() {
             Yeni Güncelleme Mevcut
           </DialogTitle>
           <DialogDescription className="text-center">
-            {currentVersion && newVersion ? (
-              <>
-                Mevcut sürüm: <strong>{currentVersion}</strong>
-                <br />
-                Yeni sürüm: <strong>{newVersion}</strong>
-                <br />
-                <span className="mt-2 inline-block">
-                  Tek tıkla yükleyin — kurulum tamamlandığında uygulama yeniden
-                  başlar.
-                </span>
-              </>
-            ) : (
-              <>CleanLedger güncellemesi hazır. Tek tıkla yükleyebilirsiniz.</>
-            )}
+            Mevcut sürüm: <strong>{currentVersion}</strong>
+            <br />
+            Yeni sürüm: <strong>{release.version}</strong>
+            <br />
+            <span className="mt-2 inline-block text-sm">
+              GitHub sürüm sayfasından kurulum dosyasını indirip kurabilirsiniz.
+            </span>
           </DialogDescription>
         </DialogHeader>
-        <Button
-          size="lg"
-          className="w-full gap-2"
-          disabled={installing}
-          onClick={() => void handleInstall()}
-        >
-          <Download className="size-5" />
-          {installing ? "Yükleniyor..." : "Yükle ve Yeniden Başlat"}
-        </Button>
+        <div className="flex flex-col gap-2">
+          <Button size="lg" className="w-full gap-2" onClick={handleDownload}>
+            <Download className="size-5" />
+            Güncellemeyi İndir
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            className="w-full"
+            onClick={() => setOpen(false)}
+          >
+            Daha Sonra
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

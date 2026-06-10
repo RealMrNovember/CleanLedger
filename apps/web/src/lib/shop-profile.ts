@@ -58,20 +58,16 @@ export function getShopProfile(): ShopProfile {
   };
 }
 
-function normalizeProfile(profile: ShopProfile): ShopProfile {
-  const normalized: ShopProfile = {
-    companyName: profile.companyName.trim(),
-    phone: profile.phone.trim(),
-    email: profile.email.trim(),
-  };
-  if (profile.logoDataUrl) {
-    normalized.logoDataUrl = profile.logoDataUrl;
-  }
-  return normalized;
-}
-
 export function saveShopProfile(profile: ShopProfile): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeProfile(profile)));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      companyName: profile.companyName.trim(),
+      phone: profile.phone.trim(),
+      email: profile.email.trim(),
+      logoDataUrl: profile.logoDataUrl,
+    })
+  );
 }
 
 export function shopProfileToContact(profile: ShopProfile): ShopContactInfo {

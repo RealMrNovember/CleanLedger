@@ -151,6 +151,13 @@ export async function checkLicense(
   return mapSnapshot(data);
 }
 
+export async function checkLicenseByEmail(
+  email: string,
+  hwid: string
+): Promise<LicenseSnapshot> {
+  return checkLicense(hwid, { email });
+}
+
 export function isLicenseUsable(snapshot: LicenseSnapshot | null): boolean {
   if (!snapshot) return false;
   if (!["active", "trial"].includes(snapshot.status)) return false;

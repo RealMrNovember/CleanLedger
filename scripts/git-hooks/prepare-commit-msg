@@ -1,0 +1,10 @@
+#!/bin/sh
+# Strip Cursor co-author / attribution lines from commit messages.
+# Installed as .git/hooks/prepare-commit-msg (not versioned).
+
+MSG_FILE="$1"
+[ -f "$MSG_FILE" ] || exit 0
+
+tmp="${MSG_FILE}.tmp"
+grep -vi 'Co-authored-by: Cursor' "$MSG_FILE" | grep -vi 'cursoragent@cursor.com' | grep -vi 'Made-with: Cursor' > "$tmp" || true
+mv "$tmp" "$MSG_FILE"

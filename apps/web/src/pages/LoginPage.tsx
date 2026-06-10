@@ -32,22 +32,20 @@ export function LoginPage() {
   };
 
   return (
-    <div className="auth-shell flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col bg-surface">
       <Navbar />
 
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 text-center">
-            <h1 className="auth-heading text-2xl font-bold">
-              Hesabınıza Giriş Yapın
-            </h1>
-            <p className="auth-subtitle mt-2">
+            <h1 className="text-2xl font-bold">Hesabınıza Giriş Yapın</h1>
+            <p className="mt-2 text-muted">
               Lisans ve işletme panelinize erişin
             </p>
           </div>
 
           <form
-            className="auth-card rounded-2xl border p-8 shadow-sm"
+            className="rounded-2xl border border-slate-200/80 bg-white p-8 shadow-sm"
             onSubmit={(e) => void handleSubmit(e)}
             noValidate
           >
@@ -85,7 +83,7 @@ export function LoginPage() {
               </button>
             </div>
 
-            <p className="auth-footer-text mt-6 text-center text-sm">
+            <p className="mt-6 text-center text-sm text-muted">
               Hesabınız yok mu?{" "}
               <Link to="/signup" className="font-semibold text-trust hover:underline">
                 Ücretsiz kayıt olun
@@ -111,11 +109,9 @@ function Field({
 }) {
   return (
     <div>
-      <label className="auth-label mb-2 block text-sm font-medium">
-        {label}
-      </label>
+      <label className="mb-2 block text-sm font-medium text-ink">{label}</label>
       <div className="relative">
-        <Icon className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
+        <Icon className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted" />
         {children}
       </div>
     </div>

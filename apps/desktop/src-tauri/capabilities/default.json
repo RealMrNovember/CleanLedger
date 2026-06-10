@@ -8,6 +8,8 @@
     "fs:default",
     "updater:default",
     "process:default",
+    "opener:default",
+    "shell:default",
     "fs:read-app-specific-dirs-recursive",
     "fs:write-files",
     "sql:default",

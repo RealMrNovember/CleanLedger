@@ -7,6 +7,10 @@ export interface LicenseDisplay {
   tone: "trial" | "full" | "lifetime" | "inactive";
 }
 
+export function isLifetimeLicense(snapshot: LicenseSnapshot): boolean {
+  return snapshot.type === "lifetime" && isLicenseUsable(snapshot);
+}
+
 export function getLicenseDisplay(snapshot: LicenseSnapshot | null): LicenseDisplay {
   if (!snapshot) {
     return { label: "Lisans: Yok", tone: "inactive" };
@@ -57,6 +61,20 @@ export function getLicenseDisplay(snapshot: LicenseSnapshot | null): LicenseDisp
         tone: "full",
       };
   }
+}
+
+export function formatLicenseDetail(snapshot: LicenseSnapshot | null): string {
+  const display = getLicenseDisplay(snapshot);
+  if (display.detail) {
+    return display.detail;
+  }
+  if (display.tone === "lifetime") {
+    return "Ömür boyu lisansınız aktif.";
+  }
+  if (display.tone === "inactive") {
+    return "Lisansınız aktif değil. Destek ile iletişime geçin.";
+  }
+  return "Lisansınız aktif.";
 }
 
 function formatDate(value: string): string | null {
