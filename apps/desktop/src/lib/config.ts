@@ -25,9 +25,7 @@ export const appConfig = {
   ),
   syncApiUrl: envUrl(
     "VITE_SYNC_API_URL",
-    import.meta.env.PROD
-      ? "https://cleanledger.cicibyte.com/api/sync.php"
-      : "/api/sync.php"
+    "https://cleanledger.cicibyte.com/api/sync.php"
   ),
   webAppUrl: envString(
     "VITE_WEB_APP_URL",

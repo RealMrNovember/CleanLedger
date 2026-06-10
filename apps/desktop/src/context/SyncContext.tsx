@@ -12,6 +12,8 @@ import {
   runSyncPull,
   runSyncPush,
 } from "@/lib/sync-service";
+import { exportDatabaseSnapshot } from "@/db/client";
+import { getSyncUpdatedAt } from "@/lib/sync-meta";
 
 interface SyncContextValue {
   syncing: boolean;
@@ -20,6 +22,13 @@ interface SyncContextValue {
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);
+
+async function localHasBusinessData(): Promise<boolean> {
+  const snap = await exportDatabaseSnapshot();
+  return (
+    snap.data.customers.length > 0 || snap.data.orders.length > 0
+  );
+}
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
@@ -31,11 +40,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (!token) return;
       setSyncing(true);
       try {
-        if (forcePull) await runSyncPull();
-        await runSyncPush();
-        setLastSyncAt(new Date().toISOString());
-      } catch {
-        /* offline */
+        if (forcePull) {
+          const pulled = await runSyncPull();
+          if (pulled) {
+            window.dispatchEvent(new Event("cleanledger-sync"));
+          }
+        }
+        if (await localHasBusinessData()) {
+          await runSyncPush();
+        }
+        setLastSyncAt(getSyncUpdatedAt() ?? new Date().toISOString());
+      } catch (err) {
+        console.warn("[CleanLedger] Senkronizasyon atlandı:", err);
       } finally {
         setSyncing(false);
       }

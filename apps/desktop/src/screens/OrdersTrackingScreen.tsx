@@ -89,6 +89,12 @@ export function OrdersTrackingScreen() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const handler = () => void load();
+    window.addEventListener("cleanledger-sync", handler);
+    return () => window.removeEventListener("cleanledger-sync", handler);
+  }, [load]);
+
   const selected = orders.find((o) => o.id === selectedId);
 
   useEffect(() => {
