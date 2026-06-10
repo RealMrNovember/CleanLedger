@@ -19,6 +19,8 @@ import { SidebarNav } from "@/components/layout/SidebarNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { LicenseBadge } from "@/components/LicenseBadge";
+import type { LicenseSnapshot } from "@/lib/license-client";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
@@ -41,10 +43,12 @@ function SidebarContent({
   collapsed,
   onNavigate,
   onLogout,
+  license,
 }: {
   collapsed: boolean;
   onNavigate?: () => void;
   onLogout: () => void;
+  license: LicenseSnapshot | null;
 }) {
   return (
     <>
@@ -64,6 +68,7 @@ function SidebarContent({
             <span>Web POS — tarayıcıda</span>
           </div>
         )}
+        <LicenseBadge license={license} compact={collapsed} />
         <Button
           variant="ghost"
           size="sm"
@@ -83,7 +88,7 @@ function SidebarContent({
 }
 
 export function WebAppLayout() {
-  const { user, logout } = useAuth();
+  const { user, license, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -102,7 +107,11 @@ export function WebAppLayout() {
           collapsed ? "w-[4.5rem]" : "w-56"
         )}
       >
-        <SidebarContent collapsed={collapsed} onLogout={handleLogout} />
+        <SidebarContent
+          collapsed={collapsed}
+          onLogout={handleLogout}
+          license={license}
+        />
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
@@ -144,6 +153,7 @@ export function WebAppLayout() {
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
               onLogout={handleLogout}
+              license={license}
             />
           </aside>
         </div>

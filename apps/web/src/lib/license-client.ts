@@ -5,12 +5,19 @@ const BASE_URL = (
 const APP_CODE = import.meta.env.VITE_LICENSE_APP_CODE ?? "cleanledger";
 const API_KEY = import.meta.env.VITE_LICENSE_API_KEY ?? "";
 
+const CACHE_KEY = "cleanledger_license_cache";
+
 export interface LicenseSnapshot {
   status: string;
   type: string;
   expiresAt: string;
   maxDevices: number;
   registeredDevices: number;
+}
+
+export interface LicenseContext {
+  email?: string;
+  clientName?: string;
 }
 
 interface LicenseApiEnvelope<T> {
@@ -22,7 +29,7 @@ interface LicenseApiEnvelope<T> {
 interface LicenseServerData {
   status: string;
   type: string;
-  expires_at: string;
+  expires_at: string | null;
   max_devices: number;
   registered_devices: number;
 }
@@ -35,7 +42,7 @@ function mapSnapshot(data: LicenseServerData): LicenseSnapshot {
   return {
     status: data.status,
     type: data.type,
-    expiresAt: data.expires_at,
+    expiresAt: data.expires_at ?? "",
     maxDevices: data.max_devices,
     registeredDevices: data.registered_devices,
   };
@@ -65,26 +72,67 @@ async function postLicense<T>(
   return parsed.data;
 }
 
-export async function startTrial(hwid: string): Promise<LicenseSnapshot> {
-  const data = await postLicense<LicenseServerData>("trial", {
+function buildBody(
+  hwid: string,
+  context?: LicenseContext
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
     app_code: APP_CODE,
     hwid,
-  });
+  };
+
+  if (context?.email) body.email = context.email;
+  if (context?.clientName) body.client_name = context.clientName;
+
+  return body;
+}
+
+export async function startTrial(
+  hwid: string,
+  context?: LicenseContext
+): Promise<LicenseSnapshot> {
+  const data = await postLicense<LicenseServerData>(
+    "trial",
+    buildBody(hwid, context)
+  );
   return mapSnapshot(data);
 }
 
-export async function checkLicense(hwid: string): Promise<LicenseSnapshot> {
-  const data = await postLicense<LicenseServerData>("check", {
-    app_code: APP_CODE,
-    hwid,
-  });
+export async function checkLicense(
+  hwid: string,
+  context?: LicenseContext
+): Promise<LicenseSnapshot> {
+  const data = await postLicense<LicenseServerData>(
+    "check",
+    buildBody(hwid, context)
+  );
   return mapSnapshot(data);
 }
 
 export function isLicenseUsable(snapshot: LicenseSnapshot): boolean {
   if (!["active", "trial"].includes(snapshot.status)) return false;
+  if (snapshot.type === "lifetime") return true;
+  if (!snapshot.expiresAt) return false;
   const expires = new Date(snapshot.expiresAt).getTime();
   return Number.isFinite(expires) && expires > Date.now();
+}
+
+export function saveLicenseCache(snapshot: LicenseSnapshot): void {
+  localStorage.setItem(CACHE_KEY, JSON.stringify(snapshot));
+}
+
+export function getLicenseCache(): LicenseSnapshot | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as LicenseSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLicenseCache(): void {
+  localStorage.removeItem(CACHE_KEY);
 }
 
 export function getInstallationId(): string {
@@ -100,10 +148,25 @@ export function getInstallationId(): string {
   }
 }
 
-export async function ensureLicense(hwid: string): Promise<LicenseSnapshot> {
+export async function ensureLicense(
+  hwid: string,
+  context?: LicenseContext
+): Promise<LicenseSnapshot> {
   try {
-    return mapSnapshot(await postLicense<LicenseServerData>("check", { app_code: APP_CODE, hwid }));
+    const snapshot = await checkLicense(hwid, context);
+    saveLicenseCache(snapshot);
+    return snapshot;
   } catch {
-    return mapSnapshot(await postLicense<LicenseServerData>("trial", { app_code: APP_CODE, hwid }));
+    const cached = getLicenseCache();
+    if (cached && isLicenseUsable(cached)) return cached;
+
+    try {
+      const trial = await startTrial(hwid, context);
+      saveLicenseCache(trial);
+      return trial;
+    } catch {
+      if (cached) return cached;
+      throw new Error("Lisans doğrulanamadı.");
+    }
   }
 }

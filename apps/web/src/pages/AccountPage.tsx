@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Sparkles, Calendar, KeyRound, Eye, EyeOff } from "lucide-react";
+import { LogOut, Sparkles, KeyRound, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { LicenseBadge } from "@/components/LicenseBadge";
 import { DownloadButton } from "@/components/DownloadButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function AccountPage() {
   const navigate = useNavigate();
-  const { user, logout, changePassword } = useAuth();
+  const { user, license, logout, changePassword, refreshLicense } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -19,9 +20,11 @@ export function AccountPage() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState("");
 
-  if (!user) return null;
+  useEffect(() => {
+    void refreshLicense();
+  }, [refreshLicense]);
 
-  const trialEnd = new Date(user.trialEndsAt).toLocaleDateString("tr-TR");
+  if (!user) return null;
 
   const handleLogout = () => {
     logout();
@@ -92,14 +95,11 @@ export function AccountPage() {
               <Info label="E-posta" value={user.email} />
               <Info label="Telefon" value={user.phone || "—"} />
               <Info label="Şehir" value={user.city || "—"} />
-              <div className="rounded-xl bg-mint-light/50 p-4 dark:bg-teal-950/40">
-                <p className="text-xs font-medium text-[#0f5f57] dark:text-teal-200">
-                  Deneme Süresi
+              <div className="sm:col-span-2">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  Lisans Durumu
                 </p>
-                <p className="mt-1 flex items-center gap-2 font-semibold">
-                  <Calendar className="size-4 text-mint" />
-                  {trialEnd} tarihine kadar
-                </p>
+                <LicenseBadge license={license} />
               </div>
             </div>
 

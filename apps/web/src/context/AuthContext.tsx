@@ -15,29 +15,68 @@ import {
   changePassword as apiChangePassword,
   type ChangePasswordInput,
 } from "@/lib/auth-api";
-import { ensureLicense, getInstallationId } from "@/lib/license-client";
+import {
+  ensureLicense,
+  getInstallationId,
+  getLicenseCache,
+  clearLicenseCache,
+  type LicenseSnapshot,
+} from "@/lib/license-client";
 import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
 
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
+  license: LicenseSnapshot | null;
   loading: boolean;
   signup: (input: SignupInput) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   changePassword: (input: ChangePasswordInput) => Promise<void>;
+  refreshLicense: () => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function licenseContextFromSession(session: AuthSession | null) {
+  if (!session?.user) return undefined;
+  return {
+    email: session.user.email,
+    clientName: session.user.companyName,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [license, setLicense] = useState<LicenseSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setSession(getSession());
-    setLoading(false);
+  const syncLicense = useCallback(async (activeSession: AuthSession | null) => {
+    if (!activeSession?.user) {
+      setLicense(null);
+      return;
+    }
+
+    try {
+      const snapshot = await ensureLicense(
+        getInstallationId(),
+        licenseContextFromSession(activeSession)
+      );
+      setLicense(snapshot);
+    } catch {
+      setLicense(getLicenseCache());
+    }
   }, []);
+
+  const refreshLicense = useCallback(async () => {
+    await syncLicense(session ?? getSession());
+  }, [session, syncLicense]);
+
+  useEffect(() => {
+    const saved = getSession();
+    setSession(saved);
+    void syncLicense(saved).finally(() => setLoading(false));
+  }, [syncLicense]);
 
   useEffect(() => {
     if (!session?.token) return;
@@ -49,29 +88,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [session?.token]);
 
-  const signup = useCallback(async (input: SignupInput) => {
-    const s = await apiSignup(input);
-    try {
-      await ensureLicense(getInstallationId());
-    } catch {
-      /* trial may already exist — signup still succeeds */
-    }
-    setSession(s);
-    await runSyncPull();
-    void runSyncPush();
-  }, []);
+  const signup = useCallback(
+    async (input: SignupInput) => {
+      const s = await apiSignup(input);
+      try {
+        await syncLicense(s);
+      } catch {
+        /* signup still succeeds */
+      }
+      setSession(s);
+      await runSyncPull();
+      void runSyncPush();
+    },
+    [syncLicense]
+  );
 
-  const login = useCallback(async (email: string, password: string) => {
-    const s = await apiLogin(email, password);
-    try {
-      await ensureLicense(getInstallationId());
-    } catch {
-      /* keep login if license server unreachable */
-    }
-    setSession(s);
-    await runSyncPull();
-    void runSyncPush();
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const s = await apiLogin(email, password);
+      try {
+        await syncLicense(s);
+      } catch {
+        /* keep login if license server unreachable */
+      }
+      setSession(s);
+      await runSyncPull();
+      void runSyncPush();
+    },
+    [syncLicense]
+  );
 
   const changePassword = useCallback(
     async (input: ChangePasswordInput) => {
@@ -91,7 +136,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     clearSession();
+    clearLicenseCache();
     setSession(null);
+    setLicense(null);
   }, []);
 
   return (
@@ -99,10 +146,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user: session?.user ?? null,
         token: session?.token ?? null,
+        license,
         loading,
         signup,
         login,
         changePassword,
+        refreshLicense,
         logout,
       }}
     >
