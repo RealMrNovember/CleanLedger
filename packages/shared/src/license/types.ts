@@ -25,6 +25,7 @@ export function isLicenseUsable(snapshot: LicenseSnapshot | null): boolean {
   if (!snapshot) return false;
   if (snapshot.lockReason) return false;
   if (!["active", "trial"].includes(snapshot.status)) return false;
+  if (snapshot.type === "dev") return true;
   if (snapshot.type === "lifetime") return true;
   if (!snapshot.expiresAt) return false;
   const expires = new Date(snapshot.expiresAt).getTime();

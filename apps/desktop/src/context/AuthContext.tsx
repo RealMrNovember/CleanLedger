@@ -23,7 +23,7 @@ import {
   type LicenseSnapshot,
 } from "@/lib/license-client";
 import { getInstallationId } from "@/lib/installation";
-import { runSyncPull, initSyncListeners } from "@/lib/sync-service";
+import { normalizeOrganizationId } from "@cleanledger/shared/organization";
 import {
   initDatabase,
   hydrateOrganizationProfileCache,
@@ -82,6 +82,7 @@ interface AuthContextValue {
   license: LicenseSnapshot | null;
   licenseUsable: boolean;
   loading: boolean;
+  bootstrapping: boolean;
   dbError: string | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -120,6 +121,7 @@ function licenseContextFromSession(
   return {
     email: session.user.email,
     clientName: session.user.companyName,
+    organizationId: normalizeOrganizationId(session.user.email),
   };
 }
 
@@ -153,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const [license, setLicense] = useState<LicenseSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
 
   const syncLicense = useCallback(async (activeSession: AuthSession | null) => {
@@ -193,7 +196,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         await initDatabase();
-        await hydrateOrganizationProfileCache();
       } catch (err) {
         setDbError(formatUnknownError(err, "Veritabanı başlatılamadı."));
         console.error("[CleanLedger] initDatabase failed:", err);
@@ -205,7 +207,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const restored = saved ? await restoreSession(saved) : null;
 
         if (restored) {
+          setBootstrapping(true);
           await switchTenantContext(restored.user.email);
+          await hydrateOrganizationProfileCache();
           const org = await syncOrganization(restored);
           if (!org.authToken?.trim()) {
             await clearAuthState();
@@ -214,22 +218,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSession(restored);
           setOrganization(org);
           await syncLicense(restored);
-          try {
-            const pulled = await runSyncPull(true);
-            if (pulled) {
-              window.dispatchEvent(new Event("cleanledger-sync"));
-            }
-          } catch (err) {
-            void err;
-          }
-          initSyncListeners(() => {
-            window.dispatchEvent(new Event("cleanledger-sync"));
-          });
         } else if (saved) {
           await clearAuthState();
         }
       } catch (err) {
-        void err;
+        console.error("[CleanLedger] Oturum geri yükleme başarısız:", err);
         try {
           await clearAuthState();
         } catch (clearErr) {
@@ -237,6 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     })().finally(() => {
+      setBootstrapping(false);
       setLoading(false);
     });
   }, [syncLicense]);
@@ -276,8 +270,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       persistSession(next);
 
       let org: OrganizationSettings;
+      setBootstrapping(true);
       try {
         await switchTenantContext(next.user.email);
+        await hydrateOrganizationProfileCache();
         org = await syncOrganization(next);
       } catch (err) {
         persistSession(null);
@@ -286,20 +282,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ? `Giriş sonrası yerel kayıt başarısız: ${err.message}`
             : "Giriş sonrası yerel kayıt başarısız."
         );
+      } finally {
+        setBootstrapping(false);
       }
 
       await syncLicense(next);
       setSession(next);
       setOrganization(org);
-
-      try {
-        const pulled = await runSyncPull(true);
-        if (pulled) {
-          window.dispatchEvent(new Event("cleanledger-sync"));
-        }
-      } catch (err) {
-        void err;
-      }
     },
     [dbError, syncLicense]
   );
@@ -341,7 +330,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         organization,
         license,
         licenseUsable,
-        loading,
+        loading: loading || bootstrapping,
+        bootstrapping,
         dbError,
         isAuthenticated: Boolean(token && session?.user),
         login,

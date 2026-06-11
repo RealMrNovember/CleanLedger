@@ -8,9 +8,7 @@ export type { DatabaseSnapshotPayload };
 
 const SYNC_API_URL =
   import.meta.env.VITE_SYNC_API_URL ??
-  (import.meta.env.PROD
-    ? "https://cleanledger.cicibyte.com/api/sync.php"
-    : "/api/sync.php");
+  "https://cleanledger.cicibyte.com/api/sync.php";
 
 const SYNC_PROTOCOL = "org";
 

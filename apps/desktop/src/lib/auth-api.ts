@@ -50,11 +50,10 @@ export class AuthApiError extends Error {
 const SESSION_KEY = "cleanledger_session";
 const LOCAL_USERS_KEY = "cleanledger_users_registry";
 
+/** Dev'de Vite proxy yok; varsayılan olarak canlı auth API kullanılır. */
 const API_BASE =
   import.meta.env.VITE_AUTH_API_URL ??
-  (import.meta.env.PROD
-    ? "https://cleanledger.cicibyte.com/api/auth.php"
-    : "/api/auth.php");
+  "https://cleanledger.cicibyte.com/api/auth.php";
 
 type StoredUser = AuthUser & { password: string; token: string };
 
@@ -124,11 +123,32 @@ async function apiRequest<T>(
     throw new AuthApiError(`Auth API'ye ulaşılamadı: ${detail}`, "NETWORK_ERROR");
   }
 
-  const data = (await res.json()) as T & { message?: string; code?: string };
+  const raw = await res.text();
+  let data: (T & { message?: string; code?: string }) | null = null;
+  if (raw.trim()) {
+    try {
+      data = JSON.parse(raw) as T & { message?: string; code?: string };
+    } catch {
+      throw new AuthApiError(
+        res.ok
+          ? "Auth API geçersiz JSON yanıtı döndürdü."
+          : `Auth API hatası (${res.status}): yanıt JSON değil.`,
+        "INVALID_RESPONSE",
+        res.status
+      );
+    }
+  }
   if (!res.ok) {
     throw new AuthApiError(
-      data.message ?? ErrorCodes.AUTH_REQUEST_FAILED,
-      data.code,
+      data?.message ?? `Auth API hatası (${res.status})`,
+      data?.code ?? ErrorCodes.AUTH_REQUEST_FAILED,
+      res.status
+    );
+  }
+  if (!data) {
+    throw new AuthApiError(
+      "Auth API boş yanıt döndürdü.",
+      "EMPTY_RESPONSE",
       res.status
     );
   }

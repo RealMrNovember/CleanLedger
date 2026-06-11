@@ -48,7 +48,7 @@ import {
   type ProductColorPreset,
   computeCreateOrderFinancials,
 } from "@cleanledger/shared";
-import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
+import { AppError, ErrorCodes, isAppError } from "@cleanledger/shared/errors";
 import type { LocalDb, DatabaseSnapshot } from "@cleanledger/shared/schema/local-db";
 import { LOCAL_DB_SCHEMA_VERSION } from "@cleanledger/shared/schema/local-db";
 import {
@@ -113,6 +113,7 @@ import { formatItemNumber, formatOrderNumber } from "@cleanledger/shared/numberi
 import { normalizeOrganizationId } from "@cleanledger/shared/organization";
 import {
   buildTenantSqlitePath,
+  buildTenantSqliteFilename,
   entityBelongsToTenant,
   extractTenantDbFromLegacy,
   hasBusinessData,
@@ -124,6 +125,10 @@ import {
   ENTITY_SCOPE_DEFAULTS,
   BRANCH_SCOPE_DEFAULT,
 } from "@cleanledger/shared/schema/entity-scope";
+import {
+  databaseInitializer,
+  type SystemDiagnosticReport,
+} from "./database-initializer";
 
 export type { LocalDb, DatabaseSnapshot };
 
@@ -132,31 +137,168 @@ const STORAGE_KEY = WEB_STORAGE_KEY_V3;
 let organizationProfileCache: OrganizationSettings | null = null;
 
 let activeSqliteOrgId: string | null = null;
+let activeTenantEmail: string | null = null;
+let tenantBootstrapLock: Promise<void> | null = null;
+let tenantBootstrapForId: string | null = null;
+
+export type { SystemDiagnosticReport };
+export function getDatabaseInitPhase() {
+  return databaseInitializer.getPhase();
+}
+export function getLastDatabaseDiagnostic(): SystemDiagnosticReport | null {
+  return databaseInitializer.getLastReport();
+}
+export function isDatabaseCorrupted(): boolean {
+  return databaseInitializer.isCorrupted();
+}
+
+export function isDatabaseSessionActive(): boolean {
+  return Boolean(activeSqliteOrgId?.trim());
+}
+
+export function waitForDatabaseSession(): Promise<void> {
+  if (!isTauri() || isDatabaseSessionActive()) return Promise.resolve();
+  dbDebug("Database session bekleniyor...");
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (isDatabaseSessionActive()) {
+        resolve();
+        return;
+      }
+      window.setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+
+export async function nuclearResetTenantDatabase(
+  organizationEmail: string
+): Promise<void> {
+  if (!isTauri()) return;
+  const tenantId = normalizeOrganizationId(organizationEmail);
+  const tauriPath = buildTenantSqlitePath(tenantId);
+  const physicalPath = await resolveSqlitePhysicalPath(tauriPath);
+  dbDebug("nuclearResetTenantDatabase — yerel DB siliniyor", {
+    tenantId,
+    physicalPath,
+  });
+  await closeSqliteConnection();
+  databaseMigratedForPath = undefined;
+  try {
+    const { exists, remove } = await import("@tauri-apps/plugin-fs");
+    if (await exists(physicalPath)) {
+      await remove(physicalPath);
+      dbDebug("nuclearResetTenantDatabase — dosya silindi", physicalPath);
+    }
+  } catch (err) {
+    console.warn("[CleanLedger] nuclearResetTenantDatabase başarısız:", err);
+    throw err;
+  }
+}
+
+function isRecoverableTenantDbError(err: unknown): boolean {
+  if (isAppError(err) && err.code === ErrorCodes.DB_SESSION_REQUIRED) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    isSqliteMissingColumnError(err) ||
+    /no such table/i.test(msg) ||
+    /malformed|corrupt|disk image|database is locked|SQLITE_/i.test(msg) ||
+    /migration failed/i.test(msg)
+  );
+}
+
+async function ensureTenantSqliteDatabaseWithRecovery(
+  tenantId: string,
+  organizationEmail: string
+): Promise<void> {
+  try {
+    await ensureTenantSqliteDatabase(tenantId);
+  } catch (err) {
+    if (!isRecoverableTenantDbError(err)) throw err;
+    console.warn(
+      "[CleanLedger] Tenant DB onarılamadı — nuclear reset uygulanıyor:",
+      err
+    );
+    await nuclearResetTenantDatabase(organizationEmail);
+    await ensureTenantSqliteDatabase(tenantId);
+  }
+}
 
 export async function switchTenantContext(organizationEmail: string): Promise<void> {
   const tenantId = normalizeOrganizationId(organizationEmail);
+  if (tenantBootstrapLock && tenantBootstrapForId === tenantId) {
+    dbDebug(
+      "[DB DEBUG] switchTenantContext — paralel çağrı mevcut kilidi bekliyor",
+      { tenantId }
+    );
+    await tenantBootstrapLock;
+    return;
+  }
+
   const previous = activeSqliteOrgId;
+  dbDebug("[DB DEBUG] switchTenantContext BAŞLADI", {
+    organizationEmail,
+    tenantId,
+    previous,
+  });
+
+  activeSqliteOrgId = tenantId;
+  activeTenantEmail = organizationEmail;
   setSyncMetaOrganization(tenantId);
+  resetDatabaseBootGate();
+  databaseInitializer.reset();
 
   if (previous && previous !== tenantId) {
+    dbDebug("switchTenantContext — tenant değişti, bağlantı kapatılıyor");
     await closeSqliteConnection();
   }
 
-  activeSqliteOrgId = tenantId;
-  await ensureTenantSqliteDatabase(tenantId);
+  tenantBootstrapForId = tenantId;
+  tenantBootstrapLock = (async () => {
+    await databaseInitializer.withBootstrapBypass(async () => {
+      await logSqliteDbPaths("switchTenantContext", tenantId);
+      await ensureTenantSqliteDatabaseWithRecovery(tenantId, organizationEmail);
+    });
+    await databaseInitializer.ensureReady();
+    markDatabaseBootReady();
+    dbDebug("[DB DEBUG] switchTenantContext BİTTİ — Session Hazır", {
+      tenantId,
+      phase: databaseInitializer.getPhase(),
+      diagnostic: databaseInitializer.getLastReport()?.compliant,
+    });
+  })().finally(() => {
+    tenantBootstrapLock = null;
+    tenantBootstrapForId = null;
+  });
+
+  try {
+    await tenantBootstrapLock;
+  } catch (err) {
+    if (!isDatabaseSessionActive() || activeSqliteOrgId === tenantId) {
+      activeSqliteOrgId = previous ?? null;
+      if (!activeSqliteOrgId) setSyncMetaOrganization(null);
+    }
+    resetDatabaseBootGate();
+    throw err;
+  }
 }
 
 /** Oturum kapanınca SQLite bağlantısı ve bellek önbelleği sıfırlanır. */
 export async function purgeTenantSessionData(): Promise<void> {
   organizationProfileCache = null;
   activeSqliteOrgId = null;
+  activeTenantEmail = null;
+  tenantBootstrapLock = null;
+  tenantBootstrapForId = null;
+  setSyncMetaOrganization(null);
   clearSyncUpdatedAt();
+  resetDatabaseBootGate();
+  databaseInitializer.reset();
   await closeSqliteConnection();
 }
 
 async function ensureTenantSqliteDatabase(tenantId: string): Promise<void> {
-  await getSqlDb();
-  await runMigrations();
+  await runMigrationsWithLock();
   const hasData = await tenantSqliteHasBusinessData();
   if (!hasData) {
     await migrateLegacySharedSqliteForTenant(tenantId);
@@ -254,6 +396,14 @@ export function getOrganizationSettingsSync(): OrganizationSettings | null {
 
 export async function hydrateOrganizationProfileCache(): Promise<void> {
   if (isTauri()) {
+    const orgId = activeSqliteOrgId ?? getOrganizationId();
+    if (!orgId?.trim()) {
+      dbDebug("hydrateOrganizationProfileCache — orgId yok, atlanıyor");
+      setOrganizationProfileCache(null);
+      return;
+    }
+    await waitForDatabaseBoot();
+    await ensureDatabaseMigrated();
     const db = await getSqlDb();
     const rows = await db.select<Record<string, unknown>>(
       "SELECT * FROM organization_settings ORDER BY id DESC LIMIT 1"
@@ -362,10 +512,12 @@ function saveLocalDb(db: LocalDb, options?: { silent?: boolean }): void {
 }
 
 function triggerSyncPush(immediate = false): void {
-  void import("@/lib/sync-service").then((m) => {
-    if (immediate) void m.runSyncPush(true);
-    else m.scheduleSyncPush();
-  });
+  void waitForDatabaseBoot().then(() =>
+    import("@/lib/sync-service").then((m) => {
+      if (immediate) void m.runSyncPush(true);
+      else m.scheduleSyncPush();
+    })
+  );
 }
 
 function isTauri(): boolean {
@@ -382,6 +534,289 @@ type SqlDb = {
 
 let sqlDb: SqlDb | undefined;
 let sqlDbPath: string | undefined;
+let databaseMigratedForPath: string | undefined;
+let databaseMigrationLock: Promise<void> | null = null;
+
+/** Tenant migration bitene kadar sync ve DB yazımları bekler. */
+let databaseBootReady = false;
+let databaseBootWaiters: Array<() => void> = [];
+
+export function resetDatabaseBootGate(): void {
+  databaseBootReady = false;
+  dbDebug("Database boot kilidi sıfırlandı");
+}
+
+export function markDatabaseBootReady(): void {
+  if (databaseBootReady) return;
+  databaseBootReady = true;
+  dbDebug("Database boot kilidi açıldı — sync serbest");
+  for (const resolve of databaseBootWaiters) resolve();
+  databaseBootWaiters = [];
+}
+
+export function isDatabaseBootReady(): boolean {
+  return !isTauri() || databaseBootReady;
+}
+
+export function waitForDatabaseBoot(): Promise<void> {
+  if (!isTauri() || databaseBootReady) return Promise.resolve();
+  dbDebug("Database boot bekleniyor...");
+  return Promise.all([
+    new Promise<void>((resolve) => {
+      databaseBootWaiters.push(resolve);
+    }),
+    databaseInitializer.waitUntilReady(),
+  ]).then(() => undefined);
+}
+
+function dbDebug(...args: unknown[]): void {
+  if (!import.meta.env.DEV) return;
+  console.log("[DB DEBUG]", ...args);
+  if (!isTauri()) return;
+  const message = args
+    .map((arg) => {
+      if (typeof arg === "string") return arg;
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    })
+    .join(" ");
+  void import("@tauri-apps/api/core")
+    .then(({ invoke }) => invoke("debug_log", { message }))
+    .catch(() => {
+      /* terminal köprüsü yoksa yalnızca webview konsolu */
+    });
+}
+
+async function resolveSqlitePhysicalPath(tauriSqlitePath: string): Promise<string> {
+  if (!isTauri()) return tauriSqlitePath;
+  try {
+    const { appDataDir, join } = await import("@tauri-apps/api/path");
+    const filename = tauriSqlitePath.replace(/^sqlite:/, "");
+    const dir = await appDataDir();
+    return await join(dir, filename);
+  } catch (err) {
+    return `${tauriSqlitePath} (fiziksel yol çözülemedi: ${
+      err instanceof Error ? err.message : String(err)
+    })`;
+  }
+}
+
+async function logSqliteDbPaths(context: string, orgId?: string | null): Promise<void> {
+  const resolvedOrg =
+    orgId?.trim() ||
+    activeSqliteOrgId ||
+    getOrganizationId() ||
+    null;
+  const tauriPath = resolvedOrg
+    ? buildTenantSqlitePath(resolvedOrg)
+    : sqlDbPath ?? "(henüz bağlantı yok)";
+  const filename = resolvedOrg
+    ? buildTenantSqliteFilename(resolvedOrg)
+    : tauriPath.replace(/^sqlite:/, "");
+  const physical =
+    typeof tauriPath === "string" && tauriPath.startsWith("sqlite:")
+      ? await resolveSqlitePhysicalPath(tauriPath)
+      : tauriPath;
+  dbDebug(`[${context}] SQLite dosyası`, {
+    organizationId: resolvedOrg ?? "(yok)",
+    tauriPath,
+    filename,
+    physicalPath: physical,
+    activeConnection: sqlDbPath ?? "(yok)",
+    migratedForPath: databaseMigratedForPath ?? "(yok)",
+  });
+}
+
+/** PRAGMA kullanmadan — her ALTER try/catch ile; duplicate column yutulur. */
+const BRUTE_FORCE_ALTER_STATEMENTS: string[] = [
+  `ALTER TABLE organization_settings ADD COLUMN global_id TEXT`,
+  `ALTER TABLE organization_settings ADD COLUMN organization_id TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE organization_settings ADD COLUMN phone TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE organization_settings ADD COLUMN address TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE organization_settings ADD COLUMN logo_data_url TEXT`,
+  `ALTER TABLE organization_settings ADD COLUMN logo_hash TEXT`,
+  `ALTER TABLE products ADD COLUMN global_id TEXT`,
+  `ALTER TABLE products ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE customer_tags ADD COLUMN global_id TEXT`,
+  `ALTER TABLE customer_tags ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE coupons ADD COLUMN global_id TEXT`,
+  `ALTER TABLE coupons ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE service_prices ADD COLUMN global_id TEXT`,
+  `ALTER TABLE service_prices ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE order_payments ADD COLUMN global_id TEXT`,
+  `ALTER TABLE order_payments ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE customers ADD COLUMN global_id TEXT`,
+  `ALTER TABLE customers ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE customers ADD COLUMN branch_id TEXT`,
+  `ALTER TABLE orders ADD COLUMN global_id TEXT`,
+  `ALTER TABLE orders ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE orders ADD COLUMN branch_id TEXT`,
+  `ALTER TABLE orders ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'cash'`,
+  `ALTER TABLE order_items ADD COLUMN global_id TEXT`,
+  `ALTER TABLE order_items ADD COLUMN organization_id TEXT`,
+  `ALTER TABLE order_items ADD COLUMN item_number TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE order_items ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE order_items ADD COLUMN original_price REAL NOT NULL DEFAULT 0`,
+  `ALTER TABLE order_items ADD COLUMN sale_price REAL NOT NULL DEFAULT 0`,
+  `ALTER TABLE order_items ADD COLUMN item_status TEXT NOT NULL DEFAULT 'received'`,
+  `ALTER TABLE order_items ADD COLUMN color TEXT`,
+];
+
+function isDuplicateColumnSqliteError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /duplicate column/i.test(msg) || /already exists/i.test(msg);
+}
+
+function isSqliteMissingColumnError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /no column named/i.test(msg);
+}
+
+async function safeBruteForceAlter(db: SqlDb, sql: string): Promise<void> {
+  const tableMatch = /ALTER\s+TABLE\s+(\w+)/i.exec(sql.trim());
+  const tableName = tableMatch?.[1] ?? sql;
+  dbDebug(`ALTER TABLE deneniyor: ${tableName}`, sql);
+  try {
+    await db.execute(sql);
+    dbDebug(`ALTER TABLE tamamlandı: ${tableName}`);
+  } catch (err) {
+    if (isDuplicateColumnSqliteError(err)) {
+      dbDebug(`ALTER TABLE zaten var (duplicate column): ${tableName}`);
+      return;
+    }
+    console.warn("[DB DEBUG] ALTER TABLE HATA:", tableName, sql, err);
+  }
+}
+
+async function bruteForceSchemaMigrations(db: SqlDb): Promise<void> {
+  dbDebug("bruteForceSchemaMigrations başladı");
+  await logSqliteDbPaths("bruteForceSchemaMigrations");
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS organization_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      global_id TEXT,
+      organization_id TEXT NOT NULL DEFAULT '',
+      company_name TEXT NOT NULL DEFAULT '',
+      admin_name TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      logo_data_url TEXT,
+      logo_hash TEXT,
+      auth_token TEXT NOT NULL DEFAULT '',
+      trial_ends_at TEXT DEFAULT '',
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  for (const sql of BRUTE_FORCE_ALTER_STATEMENTS) {
+    await safeBruteForceAlter(db, sql);
+  }
+
+  for (const sql of SQLITE_V3_MIGRATIONS) {
+    const trimmed = sql.trim();
+    if (/^ALTER\s+TABLE/i.test(trimmed)) {
+      await safeBruteForceAlter(db, sql);
+    } else {
+      try {
+        await db.execute(sql);
+      } catch {
+        /* CREATE IF NOT EXISTS / UPDATE best-effort */
+      }
+    }
+  }
+  for (const sql of SQLITE_V4_MIGRATIONS) {
+    const trimmed = sql.trim();
+    if (/^ALTER\s+TABLE/i.test(trimmed)) {
+      await safeBruteForceAlter(db, sql);
+    } else {
+      try {
+        await db.execute(sql);
+      } catch {
+        /* CREATE IF NOT EXISTS */
+      }
+    }
+  }
+  dbDebug("bruteForceSchemaMigrations bitti");
+}
+
+async function emergencyOrganizationSettingsSchema(db: SqlDb): Promise<void> {
+  dbDebug("emergencyOrganizationSettingsSchema — acil ALTER başlıyor");
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS organization_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      global_id TEXT,
+      organization_id TEXT NOT NULL DEFAULT '',
+      company_name TEXT NOT NULL DEFAULT '',
+      admin_name TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      logo_data_url TEXT,
+      logo_hash TEXT,
+      auth_token TEXT NOT NULL DEFAULT '',
+      trial_ends_at TEXT DEFAULT '',
+      updated_at TEXT NOT NULL
+    )
+  `);
+  for (const sql of BRUTE_FORCE_ALTER_STATEMENTS) {
+    if (sql.includes("organization_settings")) {
+      await safeBruteForceAlter(db, sql);
+    }
+  }
+}
+
+/** Migration kilidi — bootstrap ve initializer diagnostic ortak kullanır. */
+async function runMigrationsWithLock(): Promise<void> {
+  const orgId = requireActiveSqliteOrgId();
+  const dbPath = buildTenantSqlitePath(orgId);
+  await logSqliteDbPaths("runMigrationsWithLock", orgId);
+  if (databaseMigratedForPath === dbPath) {
+    dbDebug("runMigrationsWithLock — şema tazeleme (brute-force)", dbPath);
+    const db = await databaseInitializer.withBootstrapBypass(() =>
+      openInnerSqlDb()
+    );
+    await bruteForceSchemaMigrations(db);
+    return;
+  }
+
+  dbDebug("Migration başlatılıyor...", { orgId, dbPath });
+  if (!databaseMigrationLock) {
+    databaseMigrationLock = databaseInitializer
+      .withBootstrapBypass(() => runMigrations())
+      .then(() => {
+        databaseMigratedForPath = dbPath;
+        dbDebug("Migration tamamlandı", { dbPath });
+      })
+      .catch((err) => {
+        console.error("[DB DEBUG] Migration BAŞARISIZ:", err);
+        throw err;
+      })
+      .finally(() => {
+        databaseMigrationLock = null;
+      });
+  } else {
+    dbDebug("Migration zaten çalışıyor — mevcut kilidi bekliyor...");
+  }
+  await databaseMigrationLock;
+}
+
+/** Sync ve DB yazımlarından önce self-diagnostic + migration tamamlanana kadar bekler. */
+export async function ensureDatabaseMigrated(): Promise<void> {
+  if (!isTauri()) return;
+  if (!isDatabaseSessionActive()) {
+    dbDebug("ensureDatabaseMigrated — session yok, atlanıyor");
+    return;
+  }
+  if (databaseInitializer.isBootstrapActive()) {
+    await runMigrationsWithLock();
+    return;
+  }
+  await databaseInitializer.ensureReady();
+}
 
 export async function closeSqliteConnection(): Promise<void> {
   if (sqlDbPath) {
@@ -397,6 +832,7 @@ export async function closeSqliteConnection(): Promise<void> {
   }
   sqlDb = undefined;
   sqlDbPath = undefined;
+  databaseMigratedForPath = undefined;
 }
 
 function requireActiveSqliteOrgId(): string {
@@ -407,11 +843,25 @@ function requireActiveSqliteOrgId(): string {
   return orgId.trim().toLowerCase();
 }
 
-async function getSqlDb(): Promise<SqlDb> {
+function wrapSqlDbWithGate(inner: SqlDb): SqlDb {
+  return {
+    execute: (query, bindValues) =>
+      databaseInitializer.passGate(() => inner.execute(query, bindValues)),
+    select: (query, bindValues) =>
+      databaseInitializer.passGate(() => inner.select(query, bindValues)),
+  };
+}
+
+/** Bootstrap sırasında kullanılır — güvenlik kapısı bypass. */
+async function openInnerSqlDb(): Promise<SqlDb> {
   const orgId = requireActiveSqliteOrgId();
   const dbPath = buildTenantSqlitePath(orgId);
-  if (sqlDb && sqlDbPath === dbPath) return sqlDb;
+  if (sqlDb && sqlDbPath === dbPath) {
+    return sqlDb;
+  }
 
+  dbDebug("openInnerSqlDb — bağlantı açılıyor", { orgId, dbPath });
+  await logSqliteDbPaths("openInnerSqlDb", orgId);
   await closeSqliteConnection();
   activeSqliteOrgId = orgId;
 
@@ -427,18 +877,60 @@ async function getSqlDb(): Promise<SqlDb> {
   }
 
   sqlDbPath = dbPath;
-  sqlDb = {
+  const wrapper: SqlDb = {
     execute: async (query, bindValues) => {
-      const result = await db.execute(query, bindValues);
-      return {
-        lastInsertId: result.lastInsertId ?? 0,
-        rowsAffected: result.rowsAffected ?? 0,
+      const run = async () => {
+        const result = await db.execute(query, bindValues);
+        return {
+          lastInsertId: result.lastInsertId ?? 0,
+          rowsAffected: result.rowsAffected ?? 0,
+        };
       };
+      try {
+        return await run();
+      } catch (err) {
+        if (!isSqliteMissingColumnError(err)) throw err;
+        dbDebug("SqlDb.execute — inline schema recovery", { query, err });
+        await bruteForceSchemaMigrations(wrapper);
+        if (query.includes("organization_settings")) {
+          await emergencyOrganizationSettingsSchema(wrapper);
+        }
+        return await run();
+      }
     },
     select: (query, bindValues) => db.select(query, bindValues),
   };
+  sqlDb = wrapper;
   return sqlDb;
 }
+
+/** Güvenlik kapısı: session + self-diagnostic hazır olmadan sorgu çalışmaz. */
+async function getSqlDb(): Promise<SqlDb> {
+  await waitForDatabaseSession();
+  const inner = await databaseInitializer.passGate(() => openInnerSqlDb());
+  return wrapSqlDbWithGate(inner);
+}
+
+databaseInitializer.setDeps({
+  isTauri,
+  isSessionActive: isDatabaseSessionActive,
+  waitForSession: waitForDatabaseSession,
+  getTenantId: () => activeSqliteOrgId,
+  getTenantEmail: () => activeTenantEmail,
+  resolvePhysicalPath: resolveSqlitePhysicalPath,
+  buildTenantPath: buildTenantSqlitePath,
+  runMigrations: () => runMigrationsWithLock(),
+  bruteForceMigrations: (db) => bruteForceSchemaMigrations(db as SqlDb),
+  openInnerDb: () => databaseInitializer.withBootstrapBypass(() => openInnerSqlDb()),
+  nuclearReset: nuclearResetTenantDatabase,
+  fullTenantBootstrap: async (tenantId, organizationEmail) => {
+    await databaseInitializer.withBootstrapBypass(async () => {
+      await ensureTenantSqliteDatabase(tenantId);
+    });
+    void organizationEmail;
+  },
+  debug: dbDebug,
+});
 
 export {
   mapProduct,
@@ -782,7 +1274,9 @@ export function defaultPriceForService(
 }
 
 async function runMigrations(): Promise<void> {
-  const db = await getSqlDb();
+  dbDebug("runMigrations başladı");
+  await logSqliteDbPaths("runMigrations");
+  const db = await openInnerSqlDb();
   await db.execute(`
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -897,9 +1391,15 @@ async function runMigrations(): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS organization_settings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      global_id TEXT,
+      organization_id TEXT NOT NULL DEFAULT '',
       company_name TEXT NOT NULL DEFAULT '',
       admin_name TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      logo_data_url TEXT,
+      logo_hash TEXT,
       auth_token TEXT NOT NULL DEFAULT '',
       trial_ends_at TEXT DEFAULT '',
       updated_at TEXT NOT NULL
@@ -1021,20 +1521,8 @@ async function runMigrations(): Promise<void> {
     );
   }
 
-  for (const sql of SQLITE_V3_MIGRATIONS) {
-    try {
-      await db.execute(sql);
-    } catch {
-      /* kolon/tablo zaten var */
-    }
-  }
-  for (const sql of SQLITE_V4_MIGRATIONS) {
-    try {
-      await db.execute(sql);
-    } catch {
-      /* kolon/tablo zaten var */
-    }
-  }
+  await bruteForceSchemaMigrations(db);
+  dbDebug("runMigrations bitti");
 }
 
 async function seedServicePricesForProduct(
@@ -1131,15 +1619,21 @@ async function seedAll(): Promise<void> {
 }
 
 export async function initDatabase(): Promise<void> {
+  dbDebug("initDatabase çağrıldı");
   if (!isTauri()) {
     await seedAll();
     await ensureWhatsappTemplatesSeeded();
     return;
   }
-  const orgId = getOrganizationId();
+  if (!isDatabaseSessionActive()) {
+    dbDebug("initDatabase — session yok, atlanıyor");
+    return;
+  }
+  await waitForDatabaseBoot();
+  const orgId = activeSqliteOrgId;
+  dbDebug("initDatabase — session aktif", orgId ?? "(yok)");
   if (orgId) {
     await ensureTenantSqliteDatabase(orgId);
-    return;
   }
 }
 
@@ -2954,6 +3448,11 @@ export async function saveOrganizationSettings(
 ): Promise<OrganizationSettings> {
   const updatedAt = new Date().toISOString();
   const email = input.email.trim();
+  if (isTauri()) {
+    await waitForDatabaseSession();
+    await waitForDatabaseBoot();
+    await ensureDatabaseMigrated();
+  }
   const existing = await getOrganizationSettings();
   const row = withLogoHash({
     id: existing?.id ?? 1,
@@ -2975,28 +3474,43 @@ export async function saveOrganizationSettings(
   });
 
   if (isTauri()) {
+    dbDebug("saveOrganizationSettings — INSERT hazırlanıyor");
     const db = await getSqlDb();
     await db.execute("DELETE FROM organization_settings");
-    const result = await db.execute(
-      `INSERT INTO organization_settings (
+    const insertSql = `INSERT INTO organization_settings (
          global_id, organization_id, company_name, admin_name, email, phone, address,
          logo_data_url, logo_hash, auth_token, trial_ends_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        row.globalId,
-        row.organizationId,
-        row.companyName,
-        row.adminName,
-        row.email,
-        row.phone,
-        row.address,
-        row.logoDataUrl,
-        row.logoHash,
-        row.authToken,
-        row.trialEndsAt,
-        row.updatedAt,
-      ]
-    );
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const insertValues = [
+      row.globalId,
+      row.organizationId,
+      row.companyName,
+      row.adminName,
+      row.email,
+      row.phone,
+      row.address,
+      row.logoDataUrl,
+      row.logoHash,
+      row.authToken,
+      row.trialEndsAt,
+      row.updatedAt,
+    ];
+    let result: { lastInsertId: number; rowsAffected: number };
+    try {
+      dbDebug("saveOrganizationSettings — INSERT deneniyor (global_id dahil)");
+      result = await db.execute(insertSql, insertValues);
+      dbDebug("saveOrganizationSettings — INSERT başarılı", {
+        lastInsertId: result.lastInsertId,
+      });
+    } catch (err) {
+      if (!isSqliteMissingColumnError(err)) throw err;
+      console.warn(
+        "[DB DEBUG] saveOrganizationSettings INSERT şema hatası — acil ALTER uygulanıyor:",
+        err
+      );
+      await emergencyOrganizationSettingsSchema(db);
+      result = await db.execute(insertSql, insertValues);
+    }
     const saved = { ...row, id: result.lastInsertId };
     setOrganizationProfileCache(saved);
     const orgEntityId = saved.globalId ?? saved.organizationId;
@@ -3029,6 +3543,10 @@ export async function saveOrganizationSettings(
 
 export async function getOrganizationSettings(): Promise<OrganizationSettings | null> {
   if (isTauri()) {
+    if (!isDatabaseSessionActive()) {
+      return organizationProfileCache;
+    }
+    await waitForDatabaseSession();
     const db = await getSqlDb();
     const rows = await db.select<Record<string, unknown>>(
       "SELECT * FROM organization_settings ORDER BY id DESC LIMIT 1"
@@ -3048,9 +3566,13 @@ export async function getOrganizationSettings(): Promise<OrganizationSettings | 
 }
 
 export async function clearOrganizationSettings(): Promise<void> {
-  if (isTauri()) {
-    const db = await getSqlDb();
-    await db.execute("DELETE FROM organization_settings");
+  if (isTauri() && isDatabaseSessionActive()) {
+    try {
+      const db = await getSqlDb();
+      await db.execute("DELETE FROM organization_settings");
+    } catch {
+      /* oturum yoksa yerel silme atlanır */
+    }
   }
   const local = loadLocalDb();
   local.organizationProfile = null;
@@ -3605,6 +4127,9 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
 }
 
 async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
+  dbDebug("applyLocalDbToTauri — migration kontrolü");
+  await waitForDatabaseSession();
+  await ensureDatabaseMigrated();
   const db = await getSqlDb();
   await db.execute("DELETE FROM order_items");
   await db.execute("DELETE FROM order_payments");
@@ -3674,27 +4199,32 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
     await db.execute("DELETE FROM organization_settings");
     const org = data.organizationProfile;
     const orgRow = withLogoHash(org);
-    await db.execute(
-      `INSERT INTO organization_settings (
+    const orgInsertSql = `INSERT INTO organization_settings (
          id, global_id, organization_id, company_name, admin_name, email, phone, address,
          logo_data_url, logo_hash, auth_token, trial_ends_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        orgRow.id,
-        orgRow.globalId,
-        orgRow.organizationId,
-        orgRow.companyName,
-        orgRow.adminName,
-        orgRow.email,
-        orgRow.phone ?? "",
-        orgRow.address ?? "",
-        orgRow.logoDataUrl,
-        orgRow.logoHash,
-        orgRow.authToken,
-        orgRow.trialEndsAt,
-        orgRow.updatedAt,
-      ]
-    );
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const orgInsertValues = [
+      orgRow.id,
+      orgRow.globalId,
+      orgRow.organizationId,
+      orgRow.companyName,
+      orgRow.adminName,
+      orgRow.email,
+      orgRow.phone ?? "",
+      orgRow.address ?? "",
+      orgRow.logoDataUrl,
+      orgRow.logoHash,
+      orgRow.authToken,
+      orgRow.trialEndsAt,
+      orgRow.updatedAt,
+    ];
+    try {
+      await db.execute(orgInsertSql, orgInsertValues);
+    } catch (err) {
+      if (!isSqliteMissingColumnError(err)) throw err;
+      await emergencyOrganizationSettingsSchema(db);
+      await db.execute(orgInsertSql, orgInsertValues);
+    }
   }
 
   for (const o of data.orders) {
@@ -4209,6 +4739,12 @@ export async function markSyncChangesSynced(ids: string[]): Promise<void> {
 export async function applyRemoteSyncChanges(
   changes: SyncQueueEntry[]
 ): Promise<void> {
+  dbDebug("applyRemoteSyncChanges — boot + migration bekleniyor", {
+    changeCount: changes.length,
+  });
+  await waitForDatabaseBoot();
+  await ensureDatabaseMigrated();
+  dbDebug("applyRemoteSyncChanges — boot/migration tamam");
   if (!changes.length) return;
   const orgId = getOrganizationId();
   const scopedChanges = orgId
@@ -4238,6 +4774,8 @@ export async function exportDatabaseSnapshot(): Promise<DatabaseSnapshot> {
 export async function importDatabaseSnapshot(
   snapshot: DatabaseSnapshot
 ): Promise<void> {
+  await waitForDatabaseBoot();
+  await ensureDatabaseMigrated();
   const { db: data, warnings } = safeMigrateRecordToV4(snapshot.data);
   if (warnings.length) {
     console.warn("[CleanLedger] Snapshot import uyarıları:", warnings);

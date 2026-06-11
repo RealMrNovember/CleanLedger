@@ -20,3 +20,11 @@ export {
 } from "./v4";
 
 export { createGlobalId } from "../ids/global-id";
+
+export {
+  SQLITE_REQUIRED_TABLES,
+  SQLITE_REQUIRED_COLUMNS,
+  buildSqliteSchemaReport,
+  type SqliteRequiredTable,
+  type SqliteSchemaReport,
+} from "./sqlite-schema-manifest";

@@ -7,6 +7,9 @@ import {
   markSyncChangesSynced,
   applyRemoteSyncChanges,
   getOrganizationId,
+  ensureDatabaseMigrated,
+  waitForDatabaseBoot,
+  isDatabaseBootReady,
 } from "@/db/client";
 import {
   bumpSyncUpdatedAt,
@@ -17,6 +20,26 @@ import {
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pulling = false;
 
+function syncDebug(...args: unknown[]): void {
+  if (!import.meta.env.DEV) return;
+  console.log("[DB DEBUG] SyncService", ...args);
+  const message = `SyncService ${args
+    .map((arg) => {
+      if (typeof arg === "string") return arg;
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    })
+    .join(" ")}`;
+  void import("@tauri-apps/api/core")
+    .then(({ invoke }) => invoke("debug_log", { message }))
+    .catch(() => {
+      /* terminal köprüsü yoksa yalnızca webview konsolu */
+    });
+}
+
 type SnapshotData = DatabaseSnapshot["data"];
 
 function hasUserBusinessData(data: SnapshotData): boolean {
@@ -24,6 +47,11 @@ function hasUserBusinessData(data: SnapshotData): boolean {
 }
 
 export function scheduleSyncPush(): void {
+  if (!isDatabaseBootReady()) {
+    syncDebug("scheduleSyncPush — boot kilidi kapalı, erteleniyor");
+    void waitForDatabaseBoot().then(() => scheduleSyncPush());
+    return;
+  }
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
@@ -32,6 +60,13 @@ export function scheduleSyncPush(): void {
 }
 
 export async function runSyncPush(_immediate = false): Promise<void> {
+  syncDebug("runSyncPush başlatılıyor — boot kilidi bekleniyor", {
+    immediate: _immediate,
+  });
+  await waitForDatabaseBoot();
+  syncDebug("runSyncPush — boot kilidi açıldı, migration kontrolü");
+  await ensureDatabaseMigrated();
+  syncDebug("runSyncPush — migration tamam, push başlıyor");
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
   if (pushTimer) {
     clearTimeout(pushTimer);
@@ -88,6 +123,8 @@ async function resolveSyncConflict(conflict: {
   snapshot?: import("@cleanledger/shared/sync").DatabaseSnapshotPayload;
   serverUpdatedAt?: string;
 }): Promise<void> {
+  await waitForDatabaseBoot();
+  await ensureDatabaseMigrated();
   if (conflict.changes?.length) {
     await applyRemoteSyncChanges(conflict.changes);
   }
@@ -102,6 +139,13 @@ async function resolveSyncConflict(conflict: {
 }
 
 export async function runSyncPull(bootstrap = false): Promise<boolean> {
+  syncDebug("runSyncPull başlatılıyor — boot kilidi bekleniyor", {
+    bootstrap,
+  });
+  await waitForDatabaseBoot();
+  syncDebug("runSyncPull — boot kilidi açıldı, migration kontrolü");
+  await ensureDatabaseMigrated();
+  syncDebug("runSyncPull — migration tamam, pull başlıyor");
   if (pulling) return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return false;
   pulling = true;
@@ -123,6 +167,9 @@ export async function runSyncPull(bootstrap = false): Promise<boolean> {
     let changed = false;
 
     if (remote.changes?.length) {
+      syncDebug("runSyncPull — applyRemoteSyncChanges", {
+        changeCount: remote.changes.length,
+      });
       await applyRemoteSyncChanges(remote.changes);
       changed = true;
     }
@@ -139,6 +186,7 @@ export async function runSyncPull(bootstrap = false): Promise<boolean> {
         ));
 
     if (shouldImportSnapshot && remote.snapshot) {
+      syncDebug("runSyncPull — importDatabaseSnapshot");
       await importDatabaseSnapshot(remote.snapshot as unknown as DatabaseSnapshot);
       changed = true;
     }
@@ -161,18 +209,22 @@ export async function runSyncPull(bootstrap = false): Promise<boolean> {
 
 export function initSyncListeners(onRemoteChange?: () => void): () => void {
   const handleOnline = () => {
-    void runSyncPull().then((changed) => {
-      if (changed) onRemoteChange?.();
-      void runSyncPush(true);
-    });
+    void waitForDatabaseBoot().then(() =>
+      runSyncPull().then((changed) => {
+        if (changed) onRemoteChange?.();
+        void runSyncPush(true);
+      })
+    );
   };
 
   const handleVisible = () => {
     if (document.visibilityState !== "visible") return;
     if (!navigator.onLine) return;
-    void runSyncPull().then((changed) => {
-      if (changed) onRemoteChange?.();
-    });
+    void waitForDatabaseBoot().then(() =>
+      runSyncPull().then((changed) => {
+        if (changed) onRemoteChange?.();
+      })
+    );
   };
 
   window.addEventListener("online", handleOnline);
@@ -180,9 +232,11 @@ export function initSyncListeners(onRemoteChange?: () => void): () => void {
 
   const interval = window.setInterval(() => {
     if (!navigator.onLine) return;
-    void runSyncPull().then((changed) => {
-      if (changed) onRemoteChange?.();
-    });
+    void waitForDatabaseBoot().then(() =>
+      runSyncPull().then((changed) => {
+        if (changed) onRemoteChange?.();
+      })
+    );
   }, 15_000);
 
   return () => {

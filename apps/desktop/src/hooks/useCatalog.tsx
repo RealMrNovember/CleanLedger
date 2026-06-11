@@ -21,7 +21,7 @@ interface CatalogContextValue {
 const CatalogContext = createContext<CatalogContextValue | null>(null);
 
 export function CatalogProvider({ children }: { children: ReactNode }) {
-  const { token } = useAuth();
+  const { token, loading: authLoading } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [servicePrices, setServicePrices] = useState<ServicePrice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,14 +39,16 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!token) {
-      setProducts([]);
-      setServicePrices([]);
-      setLoading(false);
+    if (!token || authLoading) {
+      if (!token) {
+        setProducts([]);
+        setServicePrices([]);
+      }
+      setLoading(Boolean(token && authLoading));
       return;
     }
     void refresh();
-  }, [refresh, token]);
+  }, [refresh, token, authLoading]);
 
   useEffect(() => {
     const handler = () => void refresh();
