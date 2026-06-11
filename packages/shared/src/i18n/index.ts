@@ -1,38 +1,40 @@
-import { en, type MessageTree } from "./messages/en";
-import { tr } from "./messages/tr";
-import { az } from "./messages/az";
-import { ru } from "./messages/ru";
-import { fr } from "./messages/fr";
-import { it } from "./messages/it";
+import { i18nCatalogs } from "./catalogs";
+import {
+  getTranslationSafe as resolveTranslationSafe,
+  getNestedMessageValue,
+} from "./get-translation-safe";
+import { assertI18nIntegrity } from "./integrity-check";
+import { collectMessageKeys } from "./collect-keys";
+import {
+  type Locale,
+  SUPPORTED_LOCALES,
+  LOCALE_LABELS,
+  LOCALE_FLAGS,
+  LOCALE_STORAGE_KEY,
+  isLocale,
+} from "./locale";
+import type { MessageTree } from "./messages/types";
 
-export type Locale = "en" | "tr" | "az" | "ru" | "fr" | "it";
-
-export const SUPPORTED_LOCALES: Locale[] = ["en", "tr", "az", "ru", "fr", "it"];
-
-export const LOCALE_LABELS: Record<Locale, string> = {
-  en: "English",
-  tr: "Türkçe",
-  az: "Azərbaycan",
-  ru: "Русский",
-  fr: "Français",
-  it: "Italiano",
+export type { Locale };
+export {
+  SUPPORTED_LOCALES,
+  LOCALE_LABELS,
+  LOCALE_FLAGS,
+  LOCALE_STORAGE_KEY,
+  isLocale,
 };
 
-export const LOCALE_FLAGS: Record<Locale, string> = {
-  en: "🇬🇧",
-  tr: "🇹🇷",
-  az: "🇦🇿",
-  ru: "🇷🇺",
-  fr: "🇫🇷",
-  it: "🇮🇹",
-};
+const catalogs = i18nCatalogs;
 
-export const LOCALE_STORAGE_KEY = "cleanledger_locale";
-
-const catalogs: Record<Locale, MessageTree> = { en, tr, az, ru, fr, it };
-
-export function isLocale(value: string): value is Locale {
-  return (SUPPORTED_LOCALES as string[]).includes(value);
+/**
+ * Pre-build integrity gate — runs when the i18n module loads (skipped under Vitest).
+ * Fails fast if any locale catalog diverges from English key parity.
+ */
+const runtimeEnv = (
+  globalThis as { process?: { env?: Record<string, string | undefined> } }
+).process?.env;
+if (runtimeEnv?.VITEST !== "true") {
+  assertI18nIntegrity(catalogs);
 }
 
 export function detectBrowserLocale(): Locale {
@@ -65,46 +67,57 @@ export function saveLocale(locale: Locale): void {
   localStorage.setItem(LOCALE_STORAGE_KEY, locale);
 }
 
-function getNestedValue(tree: MessageTree, key: string): string | undefined {
-  const parts = key.split(".");
-  let node: unknown = tree;
-  for (const part of parts) {
-    if (!node || typeof node !== "object") return undefined;
-    node = (node as Record<string, unknown>)[part];
-  }
-  return typeof node === "string" ? node : undefined;
+/** Resolve a key with mandatory English fallback (never empty when EN exists). */
+export function getTranslationSafe(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string>
+): string {
+  return resolveTranslationSafe(catalogs, locale, key, params);
 }
 
+/** @alias getTranslationSafe */
 export function translate(
   locale: Locale,
   key: string,
   params?: Record<string, string>
 ): string {
-  const primary = getNestedValue(catalogs[locale], key);
-  const fallback = getNestedValue(catalogs.en, key);
-  let text = primary ?? fallback ?? key;
-  if (params) {
-    for (const [name, value] of Object.entries(params)) {
-      text = text.replaceAll(`{{${name}}}`, value);
-    }
-  }
-  return text;
+  return getTranslationSafe(locale, key, params);
 }
 
-export function collectMessageKeys(
-  tree: Record<string, unknown>,
-  prefix = ""
-): string[] {
-  const keys: string[] = [];
-  for (const [key, value] of Object.entries(tree)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (typeof value === "string") keys.push(path);
-    else if (value && typeof value === "object") {
-      keys.push(...collectMessageKeys(value as Record<string, unknown>, path));
-    }
-  }
-  return keys.sort();
+export function getCatalog(locale: Locale): MessageTree {
+  return catalogs[locale];
 }
 
-export { en, tr, az, ru, fr, it };
+export function getAllCatalogs(): Record<Locale, MessageTree> {
+  return catalogs;
+}
+
+export { collectMessageKeys };
+export { getNestedMessageValue };
+export { assertI18nIntegrity, I18nIntegrityError } from "./integrity-check";
+export { i18nCatalogs } from "./catalogs";
+export {
+  translateProduct,
+  translateColor,
+  translateProductName,
+  translateColorLabel,
+  productTranslationKey,
+  colorTranslationKey,
+  serviceTranslationKey,
+  translateService,
+  CATALOG_PRODUCT_SLUGS,
+  type CatalogProductSlug,
+} from "./product-mapper";
+
+export { en } from "./messages/en";
+export { tr } from "./messages/tr";
+export { az } from "./messages/az";
+export { ru } from "./messages/ru";
+export { fr } from "./messages/fr";
+export { it } from "./messages/it";
 export type { MessageTree };
+export { enCatalog } from "./messages/en-catalog";
+export { trCatalog } from "./messages/tr-catalog";
+export { buildLocaleFromEnglish } from "./messages/build-locale";
+export { deepMergeMessages } from "./messages/deep-merge";

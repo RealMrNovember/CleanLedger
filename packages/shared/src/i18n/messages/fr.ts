@@ -1,8 +1,7 @@
 import type { MessageTree } from "./types";
-import { enCatalog } from "./en-catalog";
-import { mergeMessages } from "./merge";
+import { buildLocaleFromEnglish } from "./build-locale";
 
-export const fr: MessageTree = mergeMessages(enCatalog, {
+const frPatch = {
   nav: {
     pos: "Commande (POS)",
     orders: "Suivi des commandes",
@@ -73,4 +72,6 @@ export const fr: MessageTree = mergeMessages(enCatalog, {
     title: "Clients",
     add: "Nouveau client",
   },
-});
+};
+
+export const fr: MessageTree = buildLocaleFromEnglish(frPatch);

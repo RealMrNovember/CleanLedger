@@ -12,17 +12,15 @@ import {
   SUPPORTED_LOCALES,
   resolveLocale,
   saveLocale,
-  translate,
+  getTranslationSafe,
+  translateProduct as translateProductByLocale,
+  translateColor as translateColorByLocale,
 } from "@cleanledger/shared/i18n";
 import {
   buildSchemaLabels,
   type SchemaLabels,
 } from "@cleanledger/shared/i18n/labels";
-import {
-  translateColorLabel,
-  translateProductName,
-  resolveColorDisplayI18n,
-} from "@cleanledger/shared/i18n/catalog-mappers";
+import { resolveColorDisplayI18n } from "@cleanledger/shared/i18n/product-mapper";
 import type { ProductColorPreset } from "@cleanledger/shared";
 import { translateAppError } from "@cleanledger/shared/i18n/translate-error";
 
@@ -62,7 +60,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const t = useCallback(
     (key: string, params?: Record<string, string>) =>
-      translate(locale, key, params),
+      getTranslationSafe(locale, key, params),
     [locale]
   );
 
@@ -70,13 +68,14 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const translateProduct = useCallback(
     (product: { name: string; iconName?: string | null }) =>
-      translateProductName(t, product),
-    [t]
+      translateProductByLocale(locale, product),
+    [locale]
   );
 
   const translateColor = useCallback(
-    (preset: { label: string; hex: string }) => translateColorLabel(t, preset),
-    [t]
+    (preset: { label: string; hex: string }) =>
+      translateColorByLocale(locale, preset),
+    [locale]
   );
 
   const resolveColor = useCallback(

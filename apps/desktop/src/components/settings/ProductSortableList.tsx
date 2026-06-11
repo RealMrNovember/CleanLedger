@@ -10,7 +10,6 @@ import type { Product } from "@/db/schema";
 import { SERVICE_TYPES } from "@/db/schema";
 import { deleteProduct, reorderProducts } from "@/db/client";
 import { ProductVisual } from "@/components/pos/ProductVisual";
-import { getProductIconLabel } from "@/lib/product-icons";
 import { formatCurrency, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/context/I18nContext";
@@ -112,7 +111,7 @@ export function ProductSortableList({
         </p>
       )}
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {products.map((product, index) => {
           const isBusy = busyId === product.id;
           const isDragging = dragId === product.id;
@@ -134,12 +133,12 @@ export function ProductSortableList({
                   "hover:border-mint/40 hover:bg-mint-light/10",
               )}
             >
-              <div className="flex items-start gap-2 sm:gap-3">
+              <div className="flex items-start gap-3">
                 <button
                   type="button"
                   draggable
                   onDragStart={() => setDragId(product.id)}
-                  className="mt-1 flex size-8 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/60 active:cursor-grabbing"
+                  className="mt-2 flex size-8 shrink-0 cursor-grab items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/60 active:cursor-grabbing"
                   title={t("settings.productSortDragAria")}
                   aria-label={t("settings.productSortDragAria")}
                 >
@@ -149,28 +148,30 @@ export function ProductSortableList({
                 <ProductVisual
                   name={product.name}
                   iconName={product.iconName}
-                  size="sm"
+                  size="md"
+                  className="mt-0.5"
                 />
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-bold">{displayName}</p>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <p className="text-base font-bold leading-tight">{displayName}</p>
                     <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                       #{index + 1}
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {getProductIconLabel(product.iconName)}
-                  </p>
-                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs sm:grid-cols-4">
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {SERVICE_TYPES.map((serviceType) => (
-                      <div key={serviceType} className="flex justify-between gap-2 sm:block">
-                        <span className="text-muted-foreground">
+                      <div
+                        key={serviceType}
+                        className="rounded-xl border border-border/50 bg-muted/20 px-3 py-2.5 dark:bg-muted/10"
+                      >
+                        <p className="line-clamp-2 text-[11px] font-medium leading-snug text-muted-foreground">
                           {labels.service[serviceType]}
-                        </span>
-                        <span className="font-medium">
+                        </p>
+                        <p className="mt-1.5 text-sm font-semibold tabular-nums tracking-tight text-foreground">
                           {formatCurrency(getPrice(product.id, serviceType))}
-                        </span>
+                        </p>
                       </div>
                     ))}
                   </div>

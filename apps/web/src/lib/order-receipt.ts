@@ -1,5 +1,6 @@
 import type { Order, ServiceType } from "@/db/schema";
-import { SERVICE_LABELS } from "@/db/schema";
+import { translateService } from "@cleanledger/shared/i18n";
+import type { Locale } from "@cleanledger/shared/i18n";
 import {
   getCustomerById,
   getCustomerByPhone,
@@ -12,7 +13,8 @@ import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
 import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 
 export async function buildReceiptDataForOrder(
-  orderId: number
+  orderId: number,
+  locale: Locale
 ): Promise<ReceiptData | null> {
   const order = await getOrderByIdPublic(orderId);
   if (!order) return null;
@@ -37,7 +39,10 @@ export async function buildReceiptDataForOrder(
     customerName,
     lines: items.map((item) => ({
       productName: item.productName,
-      serviceLabel: SERVICE_LABELS[item.serviceType as ServiceType],
+      serviceLabel: translateService(
+        locale,
+        item.serviceType as ServiceType
+      ),
       unitPrice: item.subtotal,
       itemNumber: item.itemNumber,
     })),
@@ -50,9 +55,10 @@ export async function buildReceiptDataForOrder(
 
 export async function buildReceiptDataFromOrder(
   order: Order,
-  customerName?: string
+  customerName: string | undefined,
+  locale: Locale
 ): Promise<ReceiptData> {
-  const data = await buildReceiptDataForOrder(order.id);
+  const data = await buildReceiptDataForOrder(order.id, locale);
   if (!data) {
     throw new AppError(ErrorCodes.ORDER_NOT_FOUND);
   }

@@ -46,15 +46,14 @@ export function ProductVisual({
         theme.gradient,
         theme.ring,
         theme.shadow,
-        theme.icon,
         interactive &&
           "transition-all duration-200 group-hover:scale-105 group-hover:shadow-md group-active:scale-95",
         className,
       )}
       aria-hidden
     >
-      <div className="absolute inset-0 rounded-[inherit] bg-white/30 dark:bg-white/5" />
-      <Icon className={cn("relative z-[1]", s.icon)} />
+      <div className="absolute inset-0 rounded-[inherit] bg-white/20 dark:bg-white/5" />
+      <Icon className={cn("relative z-[1]", theme.icon, s.icon)} />
     </div>
   );
 }

@@ -5,7 +5,7 @@ import {
 } from "@cleanledger/shared/customers/history-pdf-i18n";
 import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 import type { Locale } from "@cleanledger/shared/i18n";
-import { translate } from "@cleanledger/shared/i18n";
+import { getTranslationSafe } from "@cleanledger/shared/i18n";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 function escapeHtml(value: string): string {
@@ -69,7 +69,7 @@ export function printCustomerHistoryPdf(
   locale: Locale = "tr"
 ): void {
   const t = (key: string, params?: Record<string, string>) =>
-    translate(locale, key, params);
+    getTranslationSafe(locale, key, params);
   const labels = getCustomerHistoryPdfLabels(t);
   const html = buildCustomerHistoryHtml(
     data,

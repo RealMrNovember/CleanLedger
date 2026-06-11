@@ -6,7 +6,7 @@ import {
   type CustomerHistoryPdfLabels,
 } from "@cleanledger/shared/customers/history-pdf-i18n";
 import type { Locale } from "@cleanledger/shared/i18n";
-import { translate } from "@cleanledger/shared/i18n";
+import { getTranslationSafe } from "@cleanledger/shared/i18n";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 export async function downloadCustomerHistoryPdf(
@@ -14,7 +14,7 @@ export async function downloadCustomerHistoryPdf(
   locale: Locale = "tr"
 ): Promise<void> {
   const t = (key: string, params?: Record<string, string>) =>
-    translate(locale, key, params);
+    getTranslationSafe(locale, key, params);
   const labels = getCustomerHistoryPdfLabels(t);
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   let y = 16;

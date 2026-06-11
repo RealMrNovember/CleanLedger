@@ -63,7 +63,7 @@ import {
 } from "@cleanledger/shared";
 
 export function OrdersTrackingScreen() {
-  const { t, labels, translateProduct, translateColor } = useI18n();
+  const { t, labels, locale, translateProduct, translateColor } = useI18n();
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -249,7 +249,8 @@ export function OrdersTrackingScreen() {
     try {
       const data = await buildReceiptDataFromOrder(
         selected,
-        selected.customerName
+        selected.customerName,
+        locale
       );
       setReceiptData(data);
       setReceiptOpen(true);

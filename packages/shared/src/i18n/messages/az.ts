@@ -1,8 +1,8 @@
 import type { MessageTree } from "./types";
-import { trCatalog } from "./tr-catalog";
-import { mergeMessages } from "./merge";
+import { buildLocaleFromEnglish } from "./build-locale";
 
-export const az: MessageTree = mergeMessages(trCatalog, {
+/** Azerbaijani overrides — all other keys fall back to English via buildLocaleFromEnglish. */
+const azPatch = {
   nav: {
     pos: "Sifariş (POS)",
     orders: "Sifariş izləmə",
@@ -52,4 +52,6 @@ export const az: MessageTree = mergeMessages(trCatalog, {
     ctaLogin: "Hesabıma daxil ol",
     featuresTitle: "Niyə CleanLedger?",
   },
-});
+};
+
+export const az: MessageTree = buildLocaleFromEnglish(azPatch);

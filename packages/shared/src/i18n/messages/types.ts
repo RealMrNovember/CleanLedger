@@ -17,7 +17,8 @@ export type MessageTree = {
   enums: Record<string, string>;
   layout: Record<string, string>;
   validation: Record<string, string>;
-  catalog: Record<string, string>;
+  products: Record<string, string>;
+  colors: Record<string, string>;
   errors: Record<string, string>;
   pdf: Record<string, string>;
 };

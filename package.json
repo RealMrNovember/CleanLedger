@@ -6,11 +6,12 @@
     "packages/*"
   ],
   "scripts": {
+    "build:shared": "npm run build -w @cleanledger/shared",
     "typecheck:shared": "npm run typecheck -w @cleanledger/shared",
     "test:shared": "npm run test -w @cleanledger/shared",
     "build:web": "npm run build -w cleanledger-web",
     "deploy:web": "npm run build:web",
     "build:desktop": "npm run build -w cleanledger-desktop",
-    "build": "npm run typecheck:shared && npm run test:shared && npm run build:web && npm run build:desktop"
+    "build": "npm run build:shared && npm run build:web && npm run build:desktop"
   }
 }

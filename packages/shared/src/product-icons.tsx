@@ -186,9 +186,10 @@ export function resolveProductVisual(
   name: string,
   iconName: string,
 ): ResolvedProductVisual {
+  const fromIcon = normalizeIconId(iconName);
   const nameGuess = suggestIconFromProductName(name);
   const iconId =
-    nameGuess !== "shirt" ? nameGuess : normalizeIconId(iconName);
+    fromIcon !== "shirt" ? fromIcon : nameGuess !== "shirt" ? nameGuess : fromIcon;
   const option = ICON_MAP[iconId] ?? ICON_MAP.shirt;
 
   return {

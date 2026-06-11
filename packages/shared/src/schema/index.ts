@@ -327,6 +327,10 @@ export const SERVICE_TYPES: ServiceType[] = [
   "stain_removal",
 ];
 
+/**
+ * @deprecated Use `translateService(locale, type)` from `@cleanledger/shared/i18n`.
+ * Kept only for legacy imports — values are not locale-aware.
+ */
 export const SERVICE_LABELS: Record<ServiceType, string> = {
   dry_clean: "Kuru Temizleme",
   iron: "Sadece Ütü",

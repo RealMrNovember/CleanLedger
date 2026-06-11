@@ -22,6 +22,7 @@
     "./i18n": "./src/i18n/index.ts",
     "./i18n/labels": "./src/i18n/labels.ts",
     "./i18n/catalog-mappers": "./src/i18n/catalog-mappers.ts",
+    "./i18n/product-mapper": "./src/i18n/product-mapper.ts",
     "./i18n/license-i18n": "./src/i18n/license-i18n.ts",
     "./i18n/translate-error": "./src/i18n/translate-error.ts",
     "./errors": "./src/errors/index.ts",
@@ -35,8 +36,13 @@
     "./schema/zod": "./src/schema/zod.ts"
   },
   "scripts": {
+    "integrity": "vitest run src/i18n/i18n-parity.test.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:i18n": "vitest run src/i18n/i18n-parity.test.ts src/i18n/i18n.test.ts src/i18n/product-mapper.test.ts",
+    "pretest": "npm run integrity",
+    "pretypecheck": "npm run integrity",
+    "build": "npm run integrity && npm run typecheck && npm run test"
   },
   "dependencies": {
     "clsx": "^2.1.1",
