@@ -16,6 +16,10 @@ import {
   type ServiceType,
 } from "@/db/schema";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import {
+  hasLinePriceAdjustment,
+  linePriceCatalogTotal,
+} from "@cleanledger/shared/reports";
 
 const REPORT_TITLES: Record<ReportType, string> = {
   revenue: "Gelir & Tahsilat Raporu",
@@ -87,7 +91,12 @@ export async function downloadReportPdf(options: {
       body: [
         ["Sipariş Sayısı", String(revenue.orderCount)],
         ["Brüt Ciro (indirim öncesi)", formatCurrency(revenue.grossSubtotal)],
-        ["Toplam İndirim", formatCurrency(revenue.totalDiscounts)],
+        ["Kupon İndirimleri", formatCurrency(revenue.totalDiscounts)],
+        ["Katalog Toplamı (satır bazlı)", formatCurrency(revenue.catalogSubtotal)],
+        ["POS Satır Fiyat İndirimi", formatCurrency(revenue.linePriceAdjustments)],
+        ...(revenue.adjustedLineCount > 0
+          ? [["İndirimli Satır Sayısı", String(revenue.adjustedLineCount)]]
+          : []),
         ["Net Ciro", formatCurrency(revenue.netRevenue)],
         ["Tahsil Edilen", formatCurrency(revenue.collected)],
         ["Bekleyen / Cari", formatCurrency(revenue.outstanding)],
@@ -151,8 +160,11 @@ export async function downloadReportPdf(options: {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       for (const item of items) {
+        const priceLabel = hasLinePriceAdjustment(item)
+          ? `${formatCurrency(item.subtotal)} (katalog ${formatCurrency(linePriceCatalogTotal(item))})`
+          : formatCurrency(item.subtotal);
         doc.text(
-          `- ${item.productName} (${SERVICE_LABELS[item.serviceType as ServiceType]}): ${formatCurrency(item.subtotal)}`,
+          `- ${item.productName} (${SERVICE_LABELS[item.serviceType as ServiceType]}): ${priceLabel}`,
           16,
           detailY
         );

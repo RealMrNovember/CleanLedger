@@ -1,6 +1,8 @@
-import type { MessageTree } from "./en";
+import type { MessageTree } from "./types";
+import { enCatalog } from "./en-catalog";
+import { mergeMessages } from "./merge";
 
-export const fr: MessageTree = {
+export const fr: MessageTree = mergeMessages(enCatalog, {
   nav: {
     pos: "Commande (POS)",
     orders: "Suivi des commandes",
@@ -17,25 +19,58 @@ export const fr: MessageTree = {
     save: "Enregistrer",
     cancel: "Annuler",
     collapse: "Réduire",
+    expand: "Développer le menu",
+    closeMenu: "Fermer le menu",
+    openMenu: "Ouvrir le menu",
+    edit: "Modifier",
+    delete: "Supprimer",
+    apply: "Appliquer",
+    reset: "Réinitialiser",
+    panel: "Mon panneau",
   },
   auth: {
-    loginTitle: "Connectez-vous à votre compte",
-    loginSubtitle: "Accédez à votre licence et panneau d'activité",
+    loginTitle: "Connexion à votre compte",
+    loginSubtitle: "Accédez à votre licence et panneau",
     signupTitle: "Créer un compte gratuit",
-    signupSubtitle: "Essai de 14 jours — sans carte bancaire",
-    email: "E-mail",
-    password: "Mot de passe",
-    city: "Ville",
-    companyName: "Nom de l'entreprise",
-    ownerName: "Responsable",
-    phone: "Téléphone",
+    signupSubtitle: "Essai 14 jours — sans carte bancaire",
     login: "Connexion",
-    signup: "Commencer 14 jours gratuits",
+    signup: "Essai gratuit 14 jours",
+    signupShort: "Inscription gratuite",
     loggingIn: "Connexion…",
     signingUp: "Création du compte…",
+    forgotPassword: "Mot de passe oublié ?",
+    noAccount: "Pas de compte ?",
+    signupLink: "Inscription gratuite",
+    hasAccount: "Déjà un compte ?",
+    loginLink: "Connexion",
   },
   settings: {
     language: "Langue",
     languageHint: "Langue du navigateur par défaut ; modifiable ici.",
+    title: "Paramètres",
+    subtitle: "Profil, produits, tarifs et intégrations",
   },
-};
+  landing: {
+    badge: "Logiciel de pressing nouvelle génération",
+    heroTitle: "Prendre des commandes n'a jamais été aussi",
+    heroHighlight: "facile",
+    heroTitleEnd: "",
+    ctaTrial: "Essai gratuit 14 jours",
+    ctaLogin: "Connexion à mon compte",
+    featuresTitle: "Pourquoi CleanLedger ?",
+  },
+  pos: {
+    pay: "Payer",
+    cartTitle: "Addition",
+    customerTitle: "Client",
+    successTitle: "Commande enregistrée",
+  },
+  orders: {
+    title: "Suivi des commandes",
+    subtitle: "Commandes actives, livraison et paiements",
+  },
+  customers: {
+    title: "Clients",
+    add: "Nouveau client",
+  },
+});

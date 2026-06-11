@@ -18,6 +18,15 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   it: "Italiano",
 };
 
+export const LOCALE_FLAGS: Record<Locale, string> = {
+  en: "🇬🇧",
+  tr: "🇹🇷",
+  az: "🇦🇿",
+  ru: "🇷🇺",
+  fr: "🇫🇷",
+  it: "🇮🇹",
+};
+
 export const LOCALE_STORAGE_KEY = "cleanledger_locale";
 
 const catalogs: Record<Locale, MessageTree> = { en, tr, az, ru, fr, it };

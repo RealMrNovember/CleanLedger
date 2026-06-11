@@ -2,6 +2,7 @@ import type { LocalDb } from "../schema/local-db";
 import { normalizeOrganizationId } from "../organization/profile";
 
 export const ACTIVE_TENANT_SESSION_KEY = "cleanledger_active_tenant";
+export const LEGACY_WEB_DB_MIGRATION_FLAG = "cleanledger_legacy_db_split_v1";
 
 export function buildOrgScopedStorageKey(
   baseKey: string,
@@ -29,6 +30,33 @@ function normalizeTenantId(tenantId: string): string {
   return normalizeOrganizationId(tenantId);
 }
 
+type ScopedEntity = { organizationId?: string | null };
+
+/** Legacy tek-dosya snapshot bu firmaya ait mi? (e-posta veya organizationId) */
+export function tenantOwnsLegacyDb(db: LocalDb, tenantId: string): boolean {
+  const tenant = normalizeTenantId(tenantId);
+  const profile = db.organizationProfile;
+  if (!profile) return false;
+
+  const org = profile.organizationId?.trim().toLowerCase() || "";
+  const email = profile.email?.trim().toLowerCase() || "";
+
+  if (org === tenant || email === tenant) return true;
+
+  // Eski kayıtlar: profil e-postası shopProfile'dan gelmiş olabilir
+  if (!org && email === tenant) return true;
+
+  return false;
+}
+
+export function hasBusinessData(db: LocalDb): boolean {
+  return (
+    (db.customers?.length ?? 0) > 0 ||
+    (db.orders?.length ?? 0) > 0 ||
+    (db.products?.length ?? 0) > 1
+  );
+}
+
 function entityMatchesTenant(
   entityOrgId: string | null | undefined,
   tenantId: string,
@@ -39,8 +67,6 @@ function entityMatchesTenant(
   if (!oid) return allowLegacyUnscoped;
   return oid === tenant;
 }
-
-type ScopedEntity = { organizationId?: string | null };
 
 function filterEntities<T extends ScopedEntity>(
   items: T[],
@@ -63,16 +89,33 @@ function backfillTenantId<T extends ScopedEntity>(
   }));
 }
 
+/** Legacy org'sız kayıtlar yalnızca profil e-postası/org eşleşen kiracıya verilir. */
+function allowLegacyUnscopedForTenant(db: LocalDb, tenantId: string): boolean {
+  return tenantOwnsLegacyDb(db, tenantId);
+}
+
+/** Legacy veya birleşik snapshot'tan yalnızca bir firmaya ait kayıtları ayırır. */
+export function extractTenantDbFromLegacy(
+  legacy: LocalDb,
+  tenantId: string
+): LocalDb {
+  return isolateLocalDbForTenant(legacy, tenantId);
+}
+
 /** Yerel snapshot'tan yalnızca aktif kiracıya ait kayıtları bırakır. */
 export function isolateLocalDbForTenant(db: LocalDb, tenantId: string): LocalDb {
   const tenant = normalizeTenantId(tenantId);
-  const profileOrg = db.organizationProfile?.organizationId
-    ?.trim()
-    .toLowerCase();
-  const allowLegacyUnscoped = !profileOrg || profileOrg === tenant;
+  const allowLegacyUnscoped = allowLegacyUnscopedForTenant(db, tenantId);
+
+  const orders = backfillTenantId(
+    filterEntities(db.orders, tenant, allowLegacyUnscoped),
+    tenant
+  );
+  const orderIds = new Set(orders.map((o) => o.id));
 
   const isolated: LocalDb = {
     ...db,
+    schemaVersion: db.schemaVersion,
     products: backfillTenantId(
       filterEntities(db.products, tenant, allowLegacyUnscoped),
       tenant
@@ -93,16 +136,21 @@ export function isolateLocalDbForTenant(db: LocalDb, tenantId: string): LocalDb 
       filterEntities(db.servicePrices, tenant, allowLegacyUnscoped),
       tenant
     ),
-    orders: backfillTenantId(
-      filterEntities(db.orders, tenant, allowLegacyUnscoped),
-      tenant
-    ),
+    orders,
     orderItems: backfillTenantId(
-      filterEntities(db.orderItems, tenant, allowLegacyUnscoped),
+      db.orderItems.filter(
+        (item) =>
+          entityMatchesTenant(item.organizationId, tenant, allowLegacyUnscoped) &&
+          orderIds.has(item.orderId)
+      ),
       tenant
     ),
     orderPayments: backfillTenantId(
-      filterEntities(db.orderPayments, tenant, allowLegacyUnscoped),
+      db.orderPayments.filter(
+        (p) =>
+          entityMatchesTenant(p.organizationId, tenant, allowLegacyUnscoped) &&
+          orderIds.has(p.orderId)
+      ),
       tenant
     ),
     creditLedger: backfillTenantId(
@@ -126,6 +174,20 @@ export function isolateLocalDbForTenant(db: LocalDb, tenantId: string): LocalDb 
       filterEntities(db.orderNumberSequences ?? [], tenant, allowLegacyUnscoped),
       tenant
     ),
+    productColorPalette: db.productColorPalette,
+    nextProductId: db.nextProductId,
+    nextCustomerId: db.nextCustomerId,
+    nextCustomerTagId: db.nextCustomerTagId,
+    nextCouponId: db.nextCouponId,
+    nextServicePriceId: db.nextServicePriceId,
+    nextOrderId: db.nextOrderId,
+    nextOrderItemId: db.nextOrderItemId,
+    nextOrderPaymentId: db.nextOrderPaymentId,
+    nextOrderNumber: db.nextOrderNumber,
+    nextCreditLedgerId: db.nextCreditLedgerId,
+    nextCreditResetId: db.nextCreditResetId,
+    nextAuditLogId: db.nextAuditLogId,
+    nextWhatsappTemplateId: db.nextWhatsappTemplateId,
   };
 
   if (db.organizationProfile) {
@@ -134,58 +196,123 @@ export function isolateLocalDbForTenant(db: LocalDb, tenantId: string): LocalDb 
       tenant,
       allowLegacyUnscoped
     );
-    isolated.organizationProfile = orgMatches
-      ? {
-          ...db.organizationProfile,
-          organizationId: tenant,
-          email: db.organizationProfile.email || tenant,
-        }
-      : null;
+    const emailMatches =
+      db.organizationProfile.email?.trim().toLowerCase() === tenant;
+    isolated.organizationProfile =
+      orgMatches || emailMatches || tenantOwnsLegacyDb(db, tenant)
+        ? {
+            ...db.organizationProfile,
+            organizationId: tenant,
+            email: db.organizationProfile.email?.trim() || tenant,
+          }
+        : null;
+  } else if (tenantOwnsLegacyDb(db, tenant) || hasBusinessData(isolateLocalDbForTenantCheckOnly(db, tenant))) {
+    isolated.organizationProfile = {
+      id: 1,
+      globalId: null,
+      organizationId: tenant,
+      companyName: "",
+      adminName: "",
+      email: tenant,
+      phone: "",
+      address: "",
+      logoDataUrl: null,
+      logoHash: null,
+      authToken: "",
+      trialEndsAt: "",
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   return isolated;
 }
 
-export function resolveTenantWebStorageKey(
+/** allowLegacyUnscoped hesabı için hafif kontrol (sonsuz özyineleme yok). */
+function isolateLocalDbForTenantCheckOnly(
+  db: LocalDb,
+  tenantId: string
+): LocalDb {
+  const allowLegacyUnscoped = allowLegacyUnscopedForTenant(db, tenantId);
+  return {
+    ...db,
+    customers: filterEntities(db.customers, tenantId, allowLegacyUnscoped),
+    orders: filterEntities(db.orders, tenantId, allowLegacyUnscoped),
+  };
+}
+
+export interface TenantWebStorage {
+  read: (key: string) => string | null;
+  write: (key: string, value: string) => void;
+}
+
+/**
+ * Org-scoped anahtar yoksa veya boşsa legacy global snapshot'tan firmaya özel DB oluşturur.
+ * Legacy dosya silinmez — diğer firmalar da kendi anahtarlarına taşınabilir.
+ */
+export function bootstrapTenantWebStorage(
   baseKey: string,
   organizationEmail: string,
-  storage: {
-    read: (key: string) => string | null;
-    write: (key: string, value: string) => void;
-  }
+  storage: TenantWebStorage,
+  parseDb: (raw: string) => LocalDb,
+  serializeDb: (db: LocalDb) => string
 ): string {
   const tenantId = normalizeOrganizationId(organizationEmail);
   const orgKey = buildOrgScopedStorageKey(baseKey, tenantId);
 
-  if (storage.read(orgKey)) {
-    return orgKey;
+  const existingRaw = storage.read(orgKey);
+  if (existingRaw) {
+    try {
+      const existing = parseDb(existingRaw);
+      if (hasBusinessData(existing)) {
+        return orgKey;
+      }
+    } catch {
+      /* bozuk snapshot — legacy'den yeniden dene */
+    }
   }
 
   const legacyRaw = storage.read(baseKey);
   if (legacyRaw) {
     try {
-      const parsed = JSON.parse(legacyRaw) as LocalDb;
-      const legacyOrg = parsed.organizationProfile?.organizationId
-        ?.trim()
-        .toLowerCase();
-      if (legacyOrg === tenantId) {
-        storage.write(orgKey, legacyRaw);
+      const legacy = parseDb(legacyRaw);
+      const slice = extractTenantDbFromLegacy(legacy, tenantId);
+      if (
+        hasBusinessData(slice) ||
+        tenantOwnsLegacyDb(legacy, tenantId)
+      ) {
+        storage.write(orgKey, serializeDb(slice));
         return orgKey;
       }
     } catch {
-      /* yeni kiracı için boş DB */
+      /* legacy parse hatası */
     }
   }
 
   return orgKey;
 }
 
+/** @deprecated bootstrapTenantWebStorage kullanın */
+export function resolveTenantWebStorageKey(
+  baseKey: string,
+  organizationEmail: string,
+  storage: TenantWebStorage
+): string {
+  return bootstrapTenantWebStorage(
+    baseKey,
+    organizationEmail,
+    storage,
+    (raw) => JSON.parse(raw) as LocalDb,
+    (db) => JSON.stringify(db)
+  );
+}
+
 export function entityBelongsToTenant(
   entity: ScopedEntity,
-  tenantId: string
+  tenantId: string,
+  options?: { allowLegacyUnscoped?: boolean }
 ): boolean {
   const tenant = normalizeTenantId(tenantId);
   const oid = entity.organizationId?.trim().toLowerCase();
-  if (!oid) return false;
+  if (!oid) return options?.allowLegacyUnscoped === true;
   return oid === tenant;
 }

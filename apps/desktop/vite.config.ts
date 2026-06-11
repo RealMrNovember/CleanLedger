@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@cleanledger/shared": path.resolve(__dirname, "../../packages/shared/src"),
     },
   },
   clearScreen: false,

@@ -34,7 +34,7 @@ import {
 } from "./schema";
 import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
-import { formatCustomerName, formatUnknownError } from "@/lib/utils";
+import { formatCustomerName } from "@/lib/utils";
 import {
   resolveCustomerNameForOrder,
   summarizeOrderItemColors,
@@ -48,6 +48,7 @@ import {
   type ProductColorPreset,
   computeCreateOrderFinancials,
 } from "@cleanledger/shared";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 import type { LocalDb, DatabaseSnapshot } from "@cleanledger/shared/schema/local-db";
 import { LOCAL_DB_SCHEMA_VERSION } from "@cleanledger/shared/schema/local-db";
 import {
@@ -110,7 +111,14 @@ import { computeLinePriceMetrics } from "@cleanledger/shared/reports";
 import { DEFAULT_WHATSAPP_TEMPLATES } from "@cleanledger/shared/templates";
 import { formatItemNumber, formatOrderNumber } from "@cleanledger/shared/numbering";
 import { normalizeOrganizationId } from "@cleanledger/shared/organization";
-import { entityBelongsToTenant } from "@cleanledger/shared/tenant";
+import {
+  buildTenantSqlitePath,
+  entityBelongsToTenant,
+  extractTenantDbFromLegacy,
+  hasBusinessData,
+  isolateLocalDbForTenant,
+  LEGACY_SHARED_SQLITE_PATH,
+} from "@cleanledger/shared/tenant";
 import { clearSyncUpdatedAt, setSyncMetaOrganization } from "@/lib/sync-meta";
 import {
   ENTITY_SCOPE_DEFAULTS,
@@ -123,26 +131,103 @@ const STORAGE_KEY = WEB_STORAGE_KEY_V3;
 
 let organizationProfileCache: OrganizationSettings | null = null;
 
+let activeSqliteOrgId: string | null = null;
+
 export async function switchTenantContext(organizationEmail: string): Promise<void> {
   const tenantId = normalizeOrganizationId(organizationEmail);
+  const previous = activeSqliteOrgId;
   setSyncMetaOrganization(tenantId);
-  const current = (await getOrganizationSettings())?.organizationId
-    ?.trim()
-    .toLowerCase();
-  if (current && current !== tenantId) {
-    await resetBusinessDataForTenantSwitch();
+
+  if (previous && previous !== tenantId) {
+    await closeSqliteConnection();
   }
-  clearSyncUpdatedAt(tenantId);
+
+  activeSqliteOrgId = tenantId;
+  await ensureTenantSqliteDatabase(tenantId);
 }
 
-async function resetBusinessDataForTenantSwitch(): Promise<void> {
-  const fresh = emptyLocalDb();
-  fresh.productColorPalette = cloneDefaultProductColorPalette();
-  fresh.customerTags = seedDefaultTags();
-  if (isTauri()) {
-    await applyLocalDbToTauri(fresh);
+/** Oturum kapanınca SQLite bağlantısı ve bellek önbelleği sıfırlanır. */
+export async function purgeTenantSessionData(): Promise<void> {
+  organizationProfileCache = null;
+  activeSqliteOrgId = null;
+  clearSyncUpdatedAt();
+  await closeSqliteConnection();
+}
+
+async function ensureTenantSqliteDatabase(tenantId: string): Promise<void> {
+  await getSqlDb();
+  await runMigrations();
+  const hasData = await tenantSqliteHasBusinessData();
+  if (!hasData) {
+    await migrateLegacySharedSqliteForTenant(tenantId);
   }
-  setOrganizationProfileCache(null);
+  await seedAll();
+  await ensureWhatsappTemplatesSeeded();
+}
+
+async function tenantSqliteHasBusinessData(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    const db = await getSqlDb();
+    const rows = await db.select<{ count: number }>(
+      "SELECT COUNT(*) as count FROM customers"
+    );
+    return (rows[0]?.count ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function migrateLegacySharedSqliteForTenant(tenantId: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const Database = (await import("@tauri-apps/plugin-sql")).default;
+    let legacyDb;
+    try {
+      legacyDb = Database.get(LEGACY_SHARED_SQLITE_PATH);
+      if (!legacyDb) {
+        legacyDb = await Database.load(LEGACY_SHARED_SQLITE_PATH);
+      }
+      await legacyDb.select("SELECT 1");
+    } catch {
+      return;
+    }
+
+    const snapshot = await exportSqliteToLocalDb(legacyDb);
+    const slice = extractTenantDbFromLegacy(snapshot, tenantId);
+    if (!hasBusinessData(slice)) return;
+
+    await applyLocalDbToTauri(slice);
+  } catch (err) {
+    console.warn("[CleanLedger] Legacy SQLite tenant migration skipped:", err);
+  }
+}
+
+async function exportSqliteToLocalDb(db: {
+  select: <T>(query: string, bindValues?: unknown[]) => Promise<T[]>;
+}): Promise<LocalDb> {
+  const customers = (
+    await db.select<Record<string, unknown>>("SELECT * FROM customers")
+  ).map(mapCustomer);
+  const orders = (
+    await db.select<Record<string, unknown>>("SELECT * FROM orders")
+  ).map(mapOrder);
+  const orgRows = await db.select<Record<string, unknown>>(
+    "SELECT * FROM organization_settings ORDER BY id DESC LIMIT 1"
+  );
+  const base = emptyLocalDb();
+  base.customers = customers;
+  base.orders = orders;
+  base.organizationProfile = orgRows[0]
+    ? mapOrganizationSettings(orgRows[0])
+    : null;
+  base.products = (
+    await db.select<Record<string, unknown>>("SELECT * FROM products")
+  ).map(mapProduct);
+  base.orderItems = (
+    await db.select<Record<string, unknown>>("SELECT * FROM order_items")
+  ).map(mapOrderItem);
+  return base;
 }
 
 function tenantGuard<T extends { organizationId?: string | null }>(
@@ -150,7 +235,7 @@ function tenantGuard<T extends { organizationId?: string | null }>(
 ): T | null {
   if (!entity) return null;
   const orgId = getOrganizationId();
-  if (!orgId) return entity;
+  if (!orgId) return null;
   if (!entityBelongsToTenant(entity, orgId)) return null;
   return entity;
 }
@@ -296,32 +381,52 @@ type SqlDb = {
 };
 
 let sqlDb: SqlDb | undefined;
+let sqlDbPath: string | undefined;
 
-async function resetSqliteDatabase(): Promise<void> {
-  sqlDb = undefined;
-  if (!isTauri()) return;
-  try {
-    const { remove, exists, BaseDirectory } = await import(
-      "@tauri-apps/plugin-fs"
-    );
-    if (await exists("cleanledger.db", { baseDir: BaseDirectory.AppConfig })) {
-      await remove("cleanledger.db", { baseDir: BaseDirectory.AppConfig });
+export async function closeSqliteConnection(): Promise<void> {
+  if (sqlDbPath) {
+    try {
+      const Database = (await import("@tauri-apps/plugin-sql")).default;
+      const conn = Database.get(sqlDbPath);
+      if (conn && typeof conn.close === "function") {
+        await conn.close();
+      }
+    } catch {
+      /* ignore */
     }
-  } catch (err) {
-    console.warn("[CleanLedger] Veritabanı dosyası sıfırlanamadı:", err);
   }
+  sqlDb = undefined;
+  sqlDbPath = undefined;
+}
+
+function requireActiveSqliteOrgId(): string {
+  const orgId = activeSqliteOrgId ?? getOrganizationId();
+  if (!orgId?.trim()) {
+    throw new AppError(ErrorCodes.DB_SESSION_REQUIRED);
+  }
+  return orgId.trim().toLowerCase();
 }
 
 async function getSqlDb(): Promise<SqlDb> {
-  if (sqlDb) return sqlDb;
+  const orgId = requireActiveSqliteOrgId();
+  const dbPath = buildTenantSqlitePath(orgId);
+  if (sqlDb && sqlDbPath === dbPath) return sqlDb;
+
+  await closeSqliteConnection();
+  activeSqliteOrgId = orgId;
+
   const Database = (await import("@tauri-apps/plugin-sql")).default;
-  const dbPath = "sqlite:cleanledger.db";
   let db = Database.get(dbPath);
   try {
-    await db.select("SELECT 1");
+    if (db) await db.select("SELECT 1");
   } catch {
     db = await Database.load(dbPath);
   }
+  if (!db) {
+    db = await Database.load(dbPath);
+  }
+
+  sqlDbPath = dbPath;
   sqlDb = {
     execute: async (query, bindValues) => {
       const result = await db.execute(query, bindValues);
@@ -1031,23 +1136,11 @@ export async function initDatabase(): Promise<void> {
     await ensureWhatsappTemplatesSeeded();
     return;
   }
-
-  try {
-    await runMigrations();
-    await seedAll();
-  } catch (firstErr) {
-    console.error("[CleanLedger] Veritabanı başlatma hatası, yeniden deneniyor:", firstErr);
-    await resetSqliteDatabase();
-    try {
-      await runMigrations();
-      await seedAll();
-    } catch (retryErr) {
-      throw new Error(
-        formatUnknownError(retryErr, "Veritabanı başlatılamadı.")
-      );
-    }
+  const orgId = getOrganizationId();
+  if (orgId) {
+    await ensureTenantSqliteDatabase(orgId);
+    return;
   }
-  await ensureWhatsappTemplatesSeeded();
 }
 
 export async function getProducts(): Promise<Product[]> {
@@ -1171,19 +1264,13 @@ export interface CustomerInput {
 
 export async function getCustomers(): Promise<Customer[]> {
   if (isTauri()) {
-    const orgId = getOrganizationId();
+    const orgId = requireActiveSqliteOrgId();
     const db = await getSqlDb();
-    const rows = orgId
-      ? await db.select<Record<string, unknown>>(
-          "SELECT * FROM customers WHERE organization_id = ? OR organization_id IS NULL ORDER BY name",
-          [orgId]
-        )
-      : await db.select<Record<string, unknown>>(
-          "SELECT * FROM customers ORDER BY name"
-        );
-    return rows
-      .map(mapCustomer)
-      .filter((c) => !orgId || entityBelongsToTenant(c, orgId));
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM customers WHERE organization_id = ? ORDER BY name",
+      [orgId]
+    );
+    return rows.map(mapCustomer).filter((c) => entityBelongsToTenant(c, orgId));
   }
   return loadLocalDb().customers;
 }
@@ -1265,9 +1352,9 @@ export async function resetCustomerCredit(
   options: { note?: string; actorEmail?: string | null } = {}
 ): Promise<CreditReset> {
   const customer = await getCustomerById(customerId);
-  if (!customer) throw new Error("Müşteri bulunamadı");
+  if (!customer) throw new AppError(ErrorCodes.CUSTOMER_NOT_FOUND);
   if (customer.creditBalance <= 0.001) {
-    throw new Error("Sıfırlanacak cari bakiyesi yok.");
+    throw new AppError(ErrorCodes.NO_CREDIT_BALANCE);
   }
 
   const amountReset = customer.creditBalance;
@@ -1335,10 +1422,10 @@ export async function undoLastCreditReset(
   actorEmail?: string | null
 ): Promise<void> {
   const reset = await getLastActiveCreditReset(customerId);
-  if (!reset) throw new Error("Geri alınacak sıfırlama kaydı yok.");
+  if (!reset) throw new AppError(ErrorCodes.NO_CREDIT_RESET);
 
   const customer = await getCustomerById(customerId);
-  if (!customer) throw new Error("Müşteri bulunamadı");
+  if (!customer) throw new AppError(ErrorCodes.CUSTOMER_NOT_FOUND);
 
   const undoneAt = new Date().toISOString();
 
@@ -1510,9 +1597,7 @@ export async function updateCustomer(
 export async function deleteCustomer(id: number): Promise<void> {
   const { orders } = await getCustomerOrders(id);
   if (orders.length > 0) {
-    throw new Error(
-      "Bu müşterinin işlem geçmişi olduğu için silinemez. Tüm ziyaret ve sipariş kayıtları kalıcı olarak saklanır."
-    );
+    throw new AppError(ErrorCodes.CUSTOMER_HAS_ORDERS);
   }
 
   const customer = await getCustomerById(id);
@@ -2147,10 +2232,10 @@ export async function addOrderPayment(
   paymentMethod: PaymentMethod
 ): Promise<OrderPayment> {
   const order = await getOrderById(orderId);
-  if (!order) throw new Error("Sipariş bulunamadı");
+  if (!order) throw new AppError(ErrorCodes.ORDER_NOT_FOUND);
 
   const payAmount = Math.min(Math.max(0, amount), order.balanceDue);
-  if (payAmount <= 0) throw new Error("Ödenecek tutar yok");
+  if (payAmount <= 0) throw new AppError(ErrorCodes.NO_AMOUNT_DUE);
 
   const createdAt = new Date().toISOString();
   const payment = await insertOrderPaymentRecord(
@@ -2193,7 +2278,7 @@ export async function completeOrderDelivery(
   } = {}
 ): Promise<void> {
   const order = await getOrderById(orderId);
-  if (!order) throw new Error("Sipariş bulunamadı");
+  if (!order) throw new AppError(ErrorCodes.ORDER_NOT_FOUND);
 
   if (order.orderStatus === "delivered") return;
 
@@ -2203,7 +2288,7 @@ export async function completeOrderDelivery(
   if (mustCollect && !options.leaveOnCredit) {
     const amount = options.amount ?? 0;
     if (amount <= 0 || !options.paymentMethod) {
-      throw new Error("Teslimatta ödeme için tahsilat bilgisi gerekli.");
+      throw new AppError(ErrorCodes.DELIVERY_PAYMENT_REQUIRED);
     }
     await addOrderPayment(orderId, amount, options.paymentMethod);
   } else if (options.amount && options.amount > 0 && options.paymentMethod) {
@@ -2223,14 +2308,14 @@ export async function refundOrderPayment(paymentId: number): Promise<void> {
       [paymentId]
     );
     payment = rows[0] ? mapOrderPayment(rows[0]) : null;
-    if (!payment || payment.refunded) throw new Error("Ödeme kaydı bulunamadı");
+    if (!payment || payment.refunded) throw new AppError(ErrorCodes.PAYMENT_NOT_FOUND);
     await db.execute("UPDATE order_payments SET refunded = 1 WHERE id = ?", [
       paymentId,
     ]);
   } else {
     const local = loadLocalDb();
     payment = local.orderPayments.find((p) => p.id === paymentId) ?? null;
-    if (!payment || payment.refunded) throw new Error("Ödeme kaydı bulunamadı");
+    if (!payment || payment.refunded) throw new AppError(ErrorCodes.PAYMENT_NOT_FOUND);
     payment.refunded = 1;
     saveLocalDb(local);
   }
@@ -2559,7 +2644,7 @@ export async function updateCustomerTag(
 
 export async function deleteCustomerTag(id: number): Promise<void> {
   if (id <= 4) {
-    throw new Error("Varsayılan etiketler silinemez.");
+    throw new AppError(ErrorCodes.DEFAULT_TAGS_LOCKED);
   }
 
   const tag = await getCustomerTagById(id);
@@ -2822,7 +2907,7 @@ export async function updateWhatsappTemplate(
       [id]
     );
     template = rows[0] ? mapWhatsappTemplate(rows[0]) : null;
-    if (!template) throw new Error("Şablon bulunamadı");
+    if (!template) throw new AppError(ErrorCodes.TEMPLATE_NOT_FOUND);
     const next = {
       ...template,
       name: patch.name ?? template.name,
@@ -2838,7 +2923,7 @@ export async function updateWhatsappTemplate(
   } else {
     const local = loadLocalDb();
     const row = local.whatsappTemplates.find((t) => t.id === id);
-    if (!row) throw new Error("Şablon bulunamadı");
+    if (!row) throw new AppError(ErrorCodes.TEMPLATE_NOT_FOUND);
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.body !== undefined) row.body = patch.body;
     if (patch.active !== undefined) row.active = patch.active;
@@ -3062,9 +3147,7 @@ export async function getProductUsageCount(productId: number): Promise<number> {
 export async function deleteProduct(productId: number): Promise<void> {
   const usage = await getProductUsageCount(productId);
   if (usage > 0) {
-    throw new Error(
-      "Bu ürün geçmiş siparişlerde kullanıldığı için silinemez.",
-    );
+    throw new AppError(ErrorCodes.PRODUCT_IN_USE);
   }
 
   const product = (await getProducts()).find((p) => p.id === productId);
@@ -3996,14 +4079,20 @@ async function enqueueOrderSyncById(
 }
 
 export function getOrganizationId(): string | null {
-  if (isTauri()) return organizationProfileCache?.organizationId?.trim() || null;
-  return loadLocalDb().organizationProfile?.organizationId?.trim() || null;
+  const active = activeSqliteOrgId?.trim().toLowerCase();
+  if (active) return active;
+  if (isTauri()) {
+    return organizationProfileCache?.organizationId?.trim().toLowerCase() || null;
+  }
+  return loadLocalDb().organizationProfile?.organizationId?.trim().toLowerCase() || null;
 }
 
 async function readTauriSyncQueue(): Promise<SyncQueueEntry[]> {
+  const orgId = requireActiveSqliteOrgId();
   const db = await getSqlDb();
   const rows = await db.select<Record<string, unknown>>(
-    "SELECT * FROM sync_queue WHERE synced_at IS NULL ORDER BY client_updated_at"
+    "SELECT * FROM sync_queue WHERE synced_at IS NULL AND organization_id = ? ORDER BY client_updated_at",
+    [orgId]
   );
   return rows.map((row) => {
     const mapped = mapSyncQueueRow(row);
@@ -4121,14 +4210,19 @@ export async function applyRemoteSyncChanges(
   changes: SyncQueueEntry[]
 ): Promise<void> {
   if (!changes.length) return;
+  const orgId = getOrganizationId();
+  const scopedChanges = orgId
+    ? changes.filter((c) => entityBelongsToTenant(c, orgId))
+    : [];
+  if (!scopedChanges.length) return;
   if (isTauri()) {
     const data = await buildLocalDbFromTauri();
-    const merged = applySyncChanges(data, changes);
+    const merged = applySyncChanges(data, scopedChanges);
     await applyLocalDbToTauri(merged);
     window.dispatchEvent(new Event("cleanledger-sync"));
     return;
   }
-  const merged = applySyncChanges(loadLocalDb(), changes);
+  const merged = applySyncChanges(loadLocalDb(), scopedChanges);
   saveLocalDb(merged);
 }
 
@@ -4148,10 +4242,12 @@ export async function importDatabaseSnapshot(
   if (warnings.length) {
     console.warn("[CleanLedger] Snapshot import uyarıları:", warnings);
   }
+  const tenantId = getOrganizationId() ?? activeSqliteOrgId;
+  const scoped = tenantId ? isolateLocalDbForTenant(data, tenantId) : data;
   if (isTauri()) {
-    await applyLocalDbToTauri(data);
+    await applyLocalDbToTauri(scoped);
     triggerSyncPush();
     return;
   }
-  saveLocalDb(data);
+  saveLocalDb(scoped);
 }

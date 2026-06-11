@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search, User } from "lucide-react";
 import type { Customer } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import { getCustomers } from "@/db/client";
 import { formatCustomerName } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,7 @@ export function CustomerPickerDialog({
   onOpenChange,
   onSelect,
 }: CustomerPickerDialogProps) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +52,7 @@ export function CustomerPickerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-md overflow-hidden p-0">
         <DialogHeader className="border-b border-border/60 px-5 py-4">
-          <DialogTitle>Müşteri Ara / Seç</DialogTitle>
+          <DialogTitle>{t("pos.customerPickerTitle")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 px-5 py-4">
           <div className="relative">
@@ -58,7 +60,7 @@ export function CustomerPickerDialog({
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ad, soyad veya telefon..."
+              placeholder={t("pos.customerPickerPlaceholder")}
               className="h-11 pl-9"
               autoFocus
             />
@@ -66,11 +68,11 @@ export function CustomerPickerDialog({
           <div className="max-h-[50vh] overflow-y-auto rounded-xl border border-border/60">
             {loading ? (
               <p className="p-4 text-center text-sm text-muted-foreground">
-                Yükleniyor...
+                {t("common.loading")}
               </p>
             ) : filtered.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">
-                Müşteri bulunamadı.
+                {t("pos.customerPickerNotFound")}
               </p>
             ) : (
               <ul>

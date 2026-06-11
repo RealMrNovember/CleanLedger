@@ -1,35 +1,25 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ExternalLink, Sparkles, MessageCircle } from "lucide-react";
 import { WHATSAPP_SUPPORT_URL } from "@/lib/whatsapp";
+import { useI18n } from "@/context/I18nContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const GUIDE_ITEMS = [
-  {
-    title: "Nasıl Yeni Sipariş Eklerim?",
-    content: `Sol menüden "Sipariş (POS)" ekranını açın. Müşteri telefon numarasını girin — kayıtlı müşteride isim otomatik gelir. Ortadaki ürün ikonlarına tıklayarak parçaları sepete ekleyin. Sağ panelden her parça için "Kuru Temizleme", "Sadece Ütü" gibi işlem türünü seçin. Toplam tutar otomatik hesaplanır. "Kaydet & Yazdır" ile siparişi tamamlayın.`,
-  },
-  {
-    title: "Fiyatları Nasıl Değiştiririm?",
-    content: `Sol menüden "Ayarlar" → "Fiyat Yönetimi" sekmesine gidin. Tabloda her ürün için hizmet türüne göre fiyat kutucuklarını düzenleyin. Değişiklik yaptığınız kutudan çıktığınızda (Tab veya başka yere tıklama) fiyat kaydedilir ve POS ekranına anında yansır.`,
-  },
-  {
-    title: "Müşteri Adresini Nasıl Eklerim?",
-    content: `"Müşteriler" menüsünden "Yeni Müşteri" butonuna basın. Müşteri adı ve telefon zorunludur. "Açık Adres" alanına evden alma / eve teslim adresini yazın. Kayıtlı müşteriyi düzenlemek için müşteri kartına tıklayıp "Düzenle" kullanın.`,
-  },
-  {
-    title: "Müşteri Sipariş Geçmişini Nereden Görürüm?",
-    content: `"Müşteriler" listesinden müşteriye tıklayın. Detay sayfasında toplam harcama ve tüm geçmiş siparişler listelenir.`,
-  },
-  {
-    title: "İnternet Kesilirse Ne Olur?",
-    content: `CleanLedger offline-first çalışır. İnternet olmasa bile sipariş alabilir, müşteri ekleyebilir ve fiş oluşturabilirsiniz. Tüm veriler bilgisayarınızdaki yerel veritabanında güvende kalır.`,
-  },
-];
-
 export function HelpSection() {
+  const { t } = useI18n();
   const [openIndex, setOpenIndex] = useState<number | null>(0);
+
+  const guideItems = useMemo(
+    () => [
+      { title: t("settings.helpOrderTitle"), content: t("settings.helpOrderContent") },
+      { title: t("settings.helpPricesTitle"), content: t("settings.helpPricesContent") },
+      { title: t("settings.helpAddressTitle"), content: t("settings.helpAddressContent") },
+      { title: t("settings.helpHistoryTitle"), content: t("settings.helpHistoryContent") },
+      { title: t("settings.helpOfflineTitle"), content: t("settings.helpOfflineContent") },
+    ],
+    [t]
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -39,10 +29,9 @@ export function HelpSection() {
             <MessageCircle className="size-9" fill="currentColor" />
           </div>
           <div>
-            <h3 className="text-xl font-bold">WhatsApp Destek Hattı</h3>
+            <h3 className="text-xl font-bold">{t("settings.helpWhatsappTitle")}</h3>
             <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              Teknik destek, lisans ve kullanım sorularınız için bize WhatsApp üzerinden
-              ulaşın. Hafta içi hızlı yanıt.
+              {t("settings.helpWhatsappDesc")}
             </p>
           </div>
           <Button
@@ -56,7 +45,7 @@ export function HelpSection() {
               rel="noopener noreferrer"
             >
               <MessageCircle className="size-6" fill="currentColor" />
-              WhatsApp Destek
+              {t("settings.helpWhatsappButton")}
             </a>
           </Button>
           <p className="text-xs text-muted-foreground">+90 535 489 50 50</p>
@@ -70,7 +59,9 @@ export function HelpSection() {
               <Sparkles className="size-6 text-mint" />
             </div>
             <div>
-              <p className="text-sm font-medium text-muted-foreground">Yapımcı</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                {t("settings.helpMaker")}
+              </p>
               <p className="text-xl font-bold">Cicibyte Corp.</p>
               <a
                 href="https://www.cicibyte.com"
@@ -83,18 +74,16 @@ export function HelpSection() {
               </a>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Teknik destek ve lisans işlemleri için web sitemizi ziyaret edin.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("settings.helpMakerVisit")}</p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Adım Adım Kullanım Kılavuzu</CardTitle>
+          <CardTitle>{t("settings.helpGuideTitle")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {GUIDE_ITEMS.map((item, index) => (
+          {guideItems.map((item, index) => (
             <div
               key={item.title}
               className="overflow-hidden rounded-xl border border-border/60"

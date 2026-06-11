@@ -35,5 +35,8 @@ npm-debug.log*
 /index.html
 apps/web/api/data/users.json
 apps/web/api/data/auth.log
+apps/web/api/data/password_reset_tokens.json
+apps/web/api/data/password_reset_rate.json
 apps/web/api/data/sync/*.json
+apps/web/api/data/sync/orgs/
 apps/web/api/config.local.php

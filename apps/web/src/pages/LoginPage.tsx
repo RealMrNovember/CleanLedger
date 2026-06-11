@@ -5,10 +5,12 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { PasswordRecoveryLinks } from "@/components/auth/PasswordRecoveryLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const { t, formatError } = useI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -18,7 +20,7 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     if (!email.trim() || !password.trim()) {
-      setError("E-posta ve şifre gereklidir.");
+      setError(t("auth.emailPasswordRequired"));
       return;
     }
     setSubmitting(true);
@@ -26,7 +28,7 @@ export function LoginPage() {
       await login(email, password);
       navigate("/dashboard/pos", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Giriş başarısız.");
+      setError(formatError(err));
     } finally {
       setSubmitting(false);
     }
@@ -39,10 +41,8 @@ export function LoginPage() {
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 text-center">
-            <h1 className="text-2xl font-bold">Hesabınıza Giriş Yapın</h1>
-            <p className="mt-2 text-muted">
-              Lisans ve işletme panelinize erişin
-            </p>
+            <h1 className="text-2xl font-bold">{t("auth.loginTitle")}</h1>
+            <p className="mt-2 text-muted">{t("auth.loginSubtitle")}</p>
           </div>
 
           <form
@@ -56,25 +56,25 @@ export function LoginPage() {
               </p>
             )}
             <div className="space-y-5">
-              <Field label="E-posta" icon={Mail}>
+              <Field label={t("auth.email")} icon={Mail}>
                 <input
                   type="email"
                   name="email"
                   autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ornek@firma.com"
+                  placeholder={t("common.emailPlaceholder")}
                   className="field-input"
                 />
               </Field>
-              <Field label="Şifre" icon={Lock}>
+              <Field label={t("auth.password")} icon={Lock}>
                 <input
                   type="password"
                   name="password"
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder={t("common.passwordPlaceholder")}
                   className="field-input"
                 />
               </Field>
@@ -83,7 +83,7 @@ export function LoginPage() {
                   to="/forgot-password"
                   className="text-sm font-medium text-trust hover:underline"
                 >
-                  Parolamı unuttum
+                  {t("auth.forgotPassword")}
                 </Link>
               </div>
               <button
@@ -92,7 +92,7 @@ export function LoginPage() {
                 className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-mint font-semibold text-[#0f3d3a] transition hover:bg-mint/90 disabled:opacity-60"
               >
                 {submitting && <Loader2 className="size-5 animate-spin" />}
-                {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
+                {submitting ? t("auth.loggingIn") : t("auth.login")}
               </button>
             </div>
 
@@ -101,9 +101,9 @@ export function LoginPage() {
             </div>
 
             <p className="mt-6 text-center text-sm text-muted">
-              Hesabınız yok mu?{" "}
+              {t("auth.noAccount")}{" "}
               <Link to="/signup" className="font-semibold text-trust hover:underline">
-                Ücretsiz kayıt olun
+                {t("auth.signupLink")}
               </Link>
             </p>
           </form>

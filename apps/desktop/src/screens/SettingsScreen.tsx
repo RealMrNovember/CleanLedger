@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ServiceType } from "@/db/schema";
-import { SERVICE_LABELS, SERVICE_TYPES } from "@/db/schema";
+import { SERVICE_TYPES } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import type { Product } from "@/db/schema";
 import { updateServicePrice } from "@/db/client";
 import { useCatalog } from "@/hooks/useCatalog";
@@ -13,18 +14,21 @@ import { GeneralSettingsPanel } from "@/components/settings/GeneralSettingsPanel
 import { ProductManagementPanel } from "@/components/settings/ProductManagementPanel";
 import { CustomerTagsPanel } from "@/components/settings/CustomerTagsPanel";
 import { CouponsPanel } from "@/components/settings/CouponsPanel";
-import { UpdateSettingsPanel } from "@/components/settings/UpdateSettingsPanel";
+import { WhatsappTemplatesPanel } from "@/components/settings/WhatsappTemplatesPanel";
+import { ProductColorPalettePanel } from "@/components/settings/ProductColorPalettePanel";
 
 type SettingsTab =
   | "general"
   | "prices"
   | "products"
+  | "colors"
   | "tags"
   | "coupons"
-  | "updates"
+  | "whatsapp"
   | "help";
 
 export function SettingsScreen() {
+  const { t, labels, translateProduct } = useI18n();
   const { products, servicePrices, refresh } = useCatalog();
   const [tab, setTab] = useState<SettingsTab>("general");
   const [saving, setSaving] = useState<string | null>(null);
@@ -55,31 +59,30 @@ export function SettingsScreen() {
     }
   };
 
-  const tabs: { id: SettingsTab; label: string }[] = [
-    { id: "general", label: "Genel" },
-    { id: "prices", label: "Fiyat Yönetimi" },
-    { id: "products", label: "Ürün Yönetimi" },
-    { id: "tags", label: "Müşteri Etiketleri" },
-    { id: "coupons", label: "Kuponlar" },
-    { id: "updates", label: "Güncelleme" },
-    { id: "help", label: "Yardım & Destek" },
+  const tabs: SettingsTab[] = [
+    "general",
+    "prices",
+    "products",
+    "colors",
+    "tags",
+    "coupons",
+    "whatsapp",
+    "help",
   ];
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <div className="border-b border-border/60 px-6 py-4">
-        <h1 className="text-2xl font-bold">Ayarlar</h1>
-        <p className="text-sm text-muted-foreground">
-          Fiyat listesi, etiketler, kuponlar ve yardım merkezi
-        </p>
+        <h1 className="text-2xl font-bold">{t("settings.title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          {tabs.map((t) => (
+          {tabs.map((tabId) => (
             <Button
-              key={t.id}
-              variant={tab === t.id ? "default" : "outline"}
-              onClick={() => setTab(t.id)}
+              key={tabId}
+              variant={tab === tabId ? "default" : "outline"}
+              onClick={() => setTab(tabId)}
             >
-              {t.label}
+              {t(`settings.tabs.${tabId}`)}
             </Button>
           ))}
         </div>
@@ -92,11 +95,8 @@ export function SettingsScreen() {
           <Card className="mx-auto max-w-5xl">
             <CardHeader>
               <div>
-                <CardTitle>Ürün Fiyat Tablosu</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Değişiklikler POS ekranına anında yansır. Yeni ürün eklemek için
-                  &quot;Ürün Yönetimi&quot; sekmesini kullanın.
-                </p>
+                <CardTitle>{t("settings.pricesTitle")}</CardTitle>
+                <p className="text-sm text-muted-foreground">{t("settings.pricesHint")}</p>
               </div>
             </CardHeader>
             <CardContent>
@@ -104,10 +104,10 @@ export function SettingsScreen() {
                 <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="border-b border-border/60 text-left">
-                      <th className="pb-3 pr-4 font-semibold">Ürün</th>
+                      <th className="pb-3 pr-4 font-semibold">{t("settings.pricesProduct")}</th>
                       {SERVICE_TYPES.map((st) => (
                         <th key={st} className="pb-3 px-2 font-semibold">
-                          {SERVICE_LABELS[st]}
+                          {labels.service[st]}
                         </th>
                       ))}
                     </tr>
@@ -115,7 +115,9 @@ export function SettingsScreen() {
                   <tbody>
                     {products.map((product) => (
                       <tr key={product.id} className="border-b border-border/40">
-                        <td className="py-3 pr-4 font-medium">{product.name}</td>
+                        <td className="py-3 pr-4 font-medium">
+                          {translateProduct(product)}
+                        </td>
                         {SERVICE_TYPES.map((st) => {
                           const key = `${product.id}-${st}`;
                           return (
@@ -140,18 +142,22 @@ export function SettingsScreen() {
                 </table>
               </div>
               <p className="mt-4 text-xs text-muted-foreground">
-                Taban fiyat: {formatCurrency(products[0]?.basePrice ?? 0)} (ilk ürün)
+                {t("settings.pricesBase", {
+                  amount: formatCurrency(products[0]?.basePrice ?? 0),
+                })}
               </p>
             </CardContent>
           </Card>
         ) : tab === "products" ? (
           <ProductManagementPanel />
+        ) : tab === "colors" ? (
+          <ProductColorPalettePanel />
         ) : tab === "tags" ? (
           <CustomerTagsPanel />
         ) : tab === "coupons" ? (
           <CouponsPanel />
-        ) : tab === "updates" ? (
-          <UpdateSettingsPanel />
+        ) : tab === "whatsapp" ? (
+          <WhatsappTemplatesPanel />
         ) : (
           <HelpSection />
         )}

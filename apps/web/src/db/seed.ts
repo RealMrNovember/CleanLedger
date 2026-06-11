@@ -1,6 +1,8 @@
 import type { Product } from "./schema";
 
-export const SEED_PRODUCTS: Omit<Product, "id" | "sortOrder">[] = [
+export const SEED_PRODUCTS: Array<
+  Pick<Product, "name" | "iconName" | "basePrice">
+> = [
   { name: "Gömlek", iconName: "shirt", basePrice: 80 },
   { name: "Pantolon", iconName: "pants", basePrice: 100 },
   { name: "Ceket", iconName: "jacket", basePrice: 150 },

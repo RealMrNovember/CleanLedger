@@ -9,6 +9,7 @@ import {
 import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import { formatCustomerName } from "@/lib/utils";
 import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 
 export async function buildReceiptDataForOrder(
   orderId: number
@@ -38,6 +39,7 @@ export async function buildReceiptDataForOrder(
       productName: item.productName,
       serviceLabel: SERVICE_LABELS[item.serviceType as ServiceType],
       unitPrice: item.subtotal,
+      itemNumber: item.itemNumber,
     })),
     discountAmount: order.discountAmount,
     amountPaid: order.amountPaid,
@@ -52,7 +54,7 @@ export async function buildReceiptDataFromOrder(
 ): Promise<ReceiptData> {
   const data = await buildReceiptDataForOrder(order.id);
   if (!data) {
-    throw new Error("Sipariş bulunamadı.");
+    throw new AppError(ErrorCodes.ORDER_NOT_FOUND);
   }
   if (customerName) {
     return { ...data, customerName };

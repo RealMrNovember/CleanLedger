@@ -3,18 +3,22 @@ import { Lock, LogOut, MessageCircle, RefreshCw } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { appConfig } from "@/lib/config";
 import { WHATSAPP_SUPPORT_URL } from "@/lib/whatsapp";
+import { useI18n } from "@/context/I18nContext";
 
 interface LicenseLockedScreenProps {
   companyName?: string;
+  lockReason?: string | null;
   onRetry: () => Promise<void>;
   onLogout: () => void;
 }
 
 export function LicenseLockedScreen({
   companyName,
+  lockReason,
   onRetry,
   onLogout,
 }: LicenseLockedScreenProps) {
+  const { t } = useI18n();
   const [retrying, setRetrying] = useState(false);
 
   const whatsappMessage = encodeURIComponent(
@@ -37,11 +41,9 @@ export function LicenseLockedScreen({
         <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-red-500/15 text-red-300">
           <Lock className="size-7" />
         </div>
-        <h1 className="text-2xl font-bold">Lisans Kullanım Dışı</h1>
+        <h1 className="text-2xl font-bold">{t("license.lockedTitle")}</h1>
         <p className="mt-3 text-sm leading-relaxed text-white/70">
-          Deneme süreniz sona erdi veya lisansınız askıya alındı. CleanLedger
-          kilidi açılana kadar sisteme erişemezsiniz. Lisans yenilemek için
-          Cicibyte ile iletişime geçin.
+          {lockReason ?? t("license.lockedDefaultReason")}
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
@@ -52,7 +54,7 @@ export function LicenseLockedScreen({
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110"
           >
             <MessageCircle className="size-4" />
-            WhatsApp ile Ulaşın
+            {t("license.whatsappContact")}
           </a>
           <a
             href={appConfig.companyUrl}
@@ -72,7 +74,7 @@ export function LicenseLockedScreen({
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-mint/40 px-4 py-2.5 text-sm font-medium text-mint transition hover:bg-mint/10 disabled:opacity-60"
           >
             <RefreshCw className={`size-4 ${retrying ? "animate-spin" : ""}`} />
-            {retrying ? "Kontrol ediliyor..." : "Lisansı Tekrar Kontrol Et"}
+            {retrying ? t("license.checking") : t("license.recheck")}
           </button>
           <button
             type="button"
@@ -80,7 +82,7 @@ export function LicenseLockedScreen({
             className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-white/60 transition hover:bg-white/5 hover:text-white"
           >
             <LogOut className="size-4" />
-            Çıkış Yap
+            {t("common.logout")}
           </button>
         </div>
       </div>

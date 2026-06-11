@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
+import { useI18n } from "@/context/I18nContext";
 
 export function CouponsPanel() {
+  const { t } = useI18n();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
@@ -77,10 +79,8 @@ export function CouponsPanel() {
   return (
     <Card className="mx-auto max-w-3xl">
       <CardHeader>
-        <CardTitle>Kuponlar</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          POS ekranında uygulanacak indirim kodlarını tanımlayın.
-        </p>
+        <CardTitle>{t("settings.couponsTitle")}</CardTitle>
+        <p className="text-sm text-muted-foreground">{t("settings.couponsHint")}</p>
       </CardHeader>
       <CardContent className="space-y-6">
         <form
@@ -89,18 +89,22 @@ export function CouponsPanel() {
         >
           <div className="grid gap-4 sm:grid-cols-4">
             <div>
-              <label className="mb-1 block text-sm font-medium">Kupon Kodu</label>
+              <label className="mb-1 block text-sm font-medium">
+                {t("settings.couponCode")}
+              </label>
               <Input
                 value={form.code}
                 onChange={(e) =>
                   setForm({ ...form, code: e.target.value.toUpperCase() })
                 }
-                placeholder="KURU20"
+                placeholder={t("settings.couponCodePlaceholder")}
                 required
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Tür</label>
+              <label className="mb-1 block text-sm font-medium">
+                {t("settings.couponType")}
+              </label>
               <select
                 value={form.type}
                 onChange={(e) =>
@@ -108,12 +112,14 @@ export function CouponsPanel() {
                 }
                 className="h-11 w-full rounded-xl border-2 border-input bg-card px-3 text-sm"
               >
-                <option value="percent">Yüzde (%)</option>
-                <option value="fixed">Sabit Tutar (TL)</option>
+                <option value="percent">{t("settings.couponTypePercent")}</option>
+                <option value="fixed">{t("settings.couponTypeFixed")}</option>
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Değer</label>
+              <label className="mb-1 block text-sm font-medium">
+                {t("settings.couponValue")}
+              </label>
               <Input
                 type="number"
                 min={1}
@@ -133,24 +139,26 @@ export function CouponsPanel() {
                   }
                   className="size-4 rounded border-input"
                 />
-                Aktif
+                {t("settings.active")}
               </label>
             </div>
           </div>
           <div className="flex gap-2">
             <Button type="submit" disabled={saving}>
-              {editingId ? "Güncelle" : "Kupon Ekle"}
+              {editingId ? t("settings.couponUpdate") : t("settings.couponAdd")}
             </Button>
             {editingId && (
               <Button type="button" variant="outline" onClick={resetForm}>
-                İptal
+                {t("common.cancel")}
               </Button>
             )}
           </div>
         </form>
 
         {coupons.length === 0 ? (
-          <p className="text-center text-muted-foreground">Henüz kupon yok.</p>
+          <p className="text-center text-muted-foreground">
+            {t("settings.couponsEmpty")}
+          </p>
         ) : (
           <div className="space-y-2">
             {coupons.map((coupon) => (
@@ -162,7 +170,7 @@ export function CouponsPanel() {
                   <p className="font-semibold">{coupon.code}</p>
                   <p className="text-sm text-muted-foreground">
                     {formatDiscount(coupon)} ·{" "}
-                    {coupon.active ? "Aktif" : "Pasif"}
+                    {coupon.active ? t("settings.active") : t("settings.inactive")}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -171,19 +179,19 @@ export function CouponsPanel() {
                     size="sm"
                     onClick={() => handleEdit(coupon)}
                   >
-                    Düzenle
+                    {t("common.edit")}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="text-destructive"
                     onClick={() => {
-                      if (confirm("Kupon silinsin mi?")) {
+                      if (confirm(t("settings.couponDeleteConfirm"))) {
                         void deleteCoupon(coupon.id).then(load);
                       }
                     }}
                   >
-                    Sil
+                    {t("common.delete")}
                   </Button>
                 </div>
               </div>

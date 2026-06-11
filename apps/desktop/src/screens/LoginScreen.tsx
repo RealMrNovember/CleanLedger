@@ -1,14 +1,17 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, Loader2, ExternalLink } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { PasswordRecoveryLinks } from "@/components/auth/PasswordRecoveryLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
 import { appConfig } from "@/lib/config";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 export function LoginScreen() {
   const { login, dbError } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +22,7 @@ export function LoginScreen() {
     e.preventDefault();
     setError("");
     if (!email.trim() || !password.trim()) {
-      setError("E-posta ve şifre gereklidir.");
+      setError(t("auth.emailPasswordRequired"));
       return;
     }
     setSubmitting(true);
@@ -27,7 +30,7 @@ export function LoginScreen() {
       await login(email, password);
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Giriş başarısız.");
+      setError(err instanceof Error ? err.message : t("auth.loginFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -54,7 +57,7 @@ export function LoginScreen() {
               CleanLedger
             </h1>
             <p className="mt-1 text-sm text-slate-100">
-              Kuru temizleme yönetim sisteminize giriş yapın
+              {t("auth.desktopTagline")}
             </p>
           </div>
         </div>
@@ -71,26 +74,34 @@ export function LoginScreen() {
           )}
 
           <div className="space-y-5">
-            <Field label="E-posta" icon={Mail}>
+            <Field label={t("auth.email")} icon={Mail}>
               <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="ornek@firma.com"
+                placeholder={t("common.emailPlaceholder")}
                 className="h-12 border-white/30 bg-white/15 pl-11 text-base text-white placeholder:text-slate-400 focus-visible:border-mint focus-visible:ring-mint/40"
                 autoFocus
               />
             </Field>
 
-            <Field label="Şifre" icon={Lock}>
+            <Field label={t("auth.password")} icon={Lock}>
               <Input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder={t("common.passwordPlaceholder")}
                 className="h-12 border-white/30 bg-white/15 pl-11 text-base text-white placeholder:text-slate-400 focus-visible:border-mint focus-visible:ring-mint/40"
               />
             </Field>
+            <div className="text-right">
+              <Link
+                to="/forgot-password"
+                className="text-sm font-medium text-[#7dd3fc] hover:text-white hover:underline"
+              >
+                {t("auth.forgotPassword")}
+              </Link>
+            </div>
 
             <Button
               type="submit"
@@ -98,26 +109,30 @@ export function LoginScreen() {
               className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#0f3d3a] to-[#2d6a4f] text-base font-semibold text-white shadow-lg hover:opacity-95"
             >
               {submitting && <Loader2 className="size-5 animate-spin" />}
-              {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
+              {submitting ? t("auth.loggingIn") : t("auth.login")}
             </Button>
           </div>
 
+          <div className="mt-6 border-t border-white/10 pt-6">
+            <PasswordRecoveryLinks email={email} />
+          </div>
+
           <p className="mt-6 text-center text-xs text-slate-200">
-            Hesabınız yok mu?{" "}
+            {t("auth.noAccount")}{" "}
             <a
               href={`${appConfig.webAppUrl}/#/signup`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 font-semibold text-[#7dd3fc] hover:text-white hover:underline"
             >
-              Web sitesinden kayıt olun
+              {t("auth.signupFromWeb")}
               <ExternalLink className="size-3" />
             </a>
           </p>
         </form>
 
         <p className="mt-6 text-center text-xs text-slate-300">
-          Cicibyte Corp · Quiet Luxury Edition
+          {t("auth.desktopEdition")}
         </p>
       </div>
     </div>

@@ -12,10 +12,13 @@ import {
   runSyncPull,
   runSyncPush,
 } from "@/lib/sync-service";
+import { getPendingSyncCount } from "@/db/client";
+import { getSyncUpdatedAt } from "@/lib/sync-meta";
 
 interface SyncContextValue {
   syncing: boolean;
   lastSyncAt: string | null;
+  pendingCount: number;
   syncNow: (forcePull?: boolean) => Promise<void>;
 }
 
@@ -25,6 +28,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const [syncing, setSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const syncNow = useCallback(
     async (forcePull = false) => {
@@ -32,8 +36,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       setSyncing(true);
       try {
         if (forcePull) await runSyncPull();
-        await runSyncPush();
-        setLastSyncAt(new Date().toISOString());
+        await runSyncPush(true);
+        setLastSyncAt(getSyncUpdatedAt() ?? new Date().toISOString());
+        setPendingCount(await getPendingSyncCount());
       } catch {
         /* offline */
       } finally {
@@ -44,15 +49,30 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setSyncing(false);
+      setLastSyncAt(null);
+      setPendingCount(0);
+      return;
+    }
     void syncNow(true);
-    return initSyncListeners(() => {
+    const refreshPending = () => {
+      void getPendingSyncCount().then(setPendingCount);
+    };
+    refreshPending();
+    window.addEventListener("cleanledger-sync", refreshPending);
+    const cleanup = initSyncListeners(() => {
       void syncNow(true);
+      refreshPending();
     });
+    return () => {
+      cleanup();
+      window.removeEventListener("cleanledger-sync", refreshPending);
+    };
   }, [token, syncNow]);
 
   return (
-    <SyncContext.Provider value={{ syncing, lastSyncAt, syncNow }}>
+    <SyncContext.Provider value={{ syncing, lastSyncAt, pendingCount, syncNow }}>
       {children}
     </SyncContext.Provider>
   );

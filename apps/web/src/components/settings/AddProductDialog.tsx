@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import type { ServiceType } from "@/db/schema";
-import { SERVICE_LABELS, SERVICE_TYPES } from "@/db/schema";
+import { SERVICE_TYPES } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import { suggestIconFromProductName } from "@/lib/product-icons";
 import { IconGalleryPicker } from "@/components/settings/IconGalleryPicker";
 import { createProduct, updateServicePrice } from "@/db/client";
@@ -32,6 +33,7 @@ export function AddProductDialog({
   onOpenChange,
   onCreated,
 }: AddProductDialogProps) {
+  const { t, labels } = useI18n();
   const [name, setName] = useState("");
   const [prices, setPrices] = useState<Record<ServiceType, string>>(DEFAULT_PRICES);
   const [iconName, setIconName] = useState("shirt");
@@ -56,14 +58,16 @@ export function AddProductDialog({
     e.preventDefault();
     setError("");
     if (!name.trim()) {
-      setError("Ürün adı gerekli.");
+      setError(t("settings.productNameRequired"));
       return;
     }
 
     for (const st of SERVICE_TYPES) {
       const price = Number(prices[st]);
       if (!Number.isFinite(price) || price < 0) {
-        setError(`${SERVICE_LABELS[st]} için geçerli bir fiyat girin.`);
+        setError(
+          t("settings.productPriceInvalid", { service: labels.service[st] })
+        );
         return;
       }
     }
@@ -85,7 +89,7 @@ export function AddProductDialog({
       onCreated();
       onOpenChange(false);
     } catch {
-      setError("Ürün eklenemedi.");
+      setError(t("settings.productAddFailed"));
     } finally {
       setSaving(false);
     }
@@ -103,7 +107,7 @@ export function AddProductDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="size-5 text-mint" />
-            Yeni Ürün Ekle
+            {t("pos.catalogAddProduct")}
           </DialogTitle>
         </DialogHeader>
 
@@ -115,24 +119,26 @@ export function AddProductDialog({
           )}
 
           <div>
-            <label className="mb-2 block text-sm font-medium">Ürün Adı</label>
+            <label className="mb-2 block text-sm font-medium">
+              {t("settings.productNameLabel")}
+            </label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Örn: Mont, Halı, Koltuk"
+              placeholder={t("settings.productNamePlaceholder")}
               className="h-11"
             />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium">
-              Hizmet Fiyatları (₺)
+              {t("settings.servicePricesLabel")}
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               {SERVICE_TYPES.map((st) => (
                 <div key={st}>
                   <label className="mb-1 block text-xs text-muted-foreground">
-                    {SERVICE_LABELS[st]}
+                    {labels.service[st]}
                   </label>
                   <Input
                     type="number"
@@ -151,11 +157,11 @@ export function AddProductDialog({
 
           <div>
             <label className="mb-3 block text-sm font-medium">
-              Özel Ürün Kategorisi — İkon Seçin
+              {t("settings.productIconLabel")}
             </label>
             <IconGalleryPicker
               value={iconName}
-              previewName={name.trim() || "Örnek Ürün"}
+              previewName={name.trim() || t("settings.sampleProduct")}
               onChange={(id) => {
                 iconManuallyPicked.current = true;
                 setIconName(id);
@@ -164,7 +170,7 @@ export function AddProductDialog({
           </div>
 
           <Button type="submit" className="w-full" size="lg" disabled={saving}>
-            {saving ? "Kaydediliyor..." : "Ürünü Kaydet"}
+            {saving ? t("common.saving") : t("settings.addProductSave")}
           </Button>
         </form>
       </DialogContent>

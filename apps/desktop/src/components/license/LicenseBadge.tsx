@@ -1,10 +1,12 @@
 import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
+import { licenseToneClasses } from "@/lib/license-display";
 import {
-  getLicenseDisplay,
-  licenseToneClasses,
-} from "@/lib/license-display";
+  formatLocalizedLicenseDetail,
+  getLocalizedLicenseDisplay,
+} from "@cleanledger/shared/i18n/license-i18n";
 
 interface LicenseBadgeProps {
   collapsed?: boolean;
@@ -12,12 +14,20 @@ interface LicenseBadgeProps {
 
 export function LicenseBadge({ collapsed }: LicenseBadgeProps) {
   const { license, loading } = useAuth();
-  const display = loading && !license
-    ? { label: "Lisans: Kontrol ediliyor…", tone: "inactive" as const }
-    : getLicenseDisplay(license);
-  const tooltip = display.detail
-    ? `${display.label} — ${display.detail}`
-    : display.label;
+  const { t, locale } = useI18n();
+  const display =
+    loading && !license
+      ? {
+          label: t("license.checkingBadge"),
+          detail: undefined,
+          tone: "inactive" as const,
+        }
+      : getLocalizedLicenseDisplay(t, locale, license);
+  const detail =
+    license && !loading
+      ? formatLocalizedLicenseDetail(t, locale, license)
+      : display.detail;
+  const tooltip = detail ? `${display.label} — ${detail}` : display.label;
 
   return (
     <div
@@ -32,8 +42,8 @@ export function LicenseBadge({ collapsed }: LicenseBadgeProps) {
       {!collapsed && (
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-semibold">{display.label}</p>
-          {display.detail && (
-            <p className="truncate text-[10px] opacity-80">{display.detail}</p>
+          {detail && (
+            <p className="truncate text-[10px] opacity-80">{detail}</p>
           )}
         </div>
       )}

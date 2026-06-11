@@ -4,31 +4,35 @@ import type {
   Order,
   ServiceType,
   PaymentMethod,
-  OrderPriority,
+  PaymentMode,
   Customer,
 } from "@/db/schema";
-import { SERVICE_LABELS } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import {
   createOrder,
   getCustomerByPhone,
   getCustomerCreditDebt,
+  getProductColorPalette,
   getServicePrice,
   upsertCustomerByPhone,
   validateCouponCode,
 } from "@/db/client";
+import { resolveColorDisplay, type ProductColorPreset } from "@cleanledger/shared";
 import { formatCustomerName } from "@/lib/utils";
 import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import { useCatalog } from "@/hooks/useCatalog";
-import { toDateKey, addDaysToDate } from "@/lib/dates";
 import { CustomerPanel } from "@/components/pos/CustomerPanel";
 import { CustomerPickerDialog } from "@/components/pos/CustomerPickerDialog";
 import { ProductCatalog } from "@/components/pos/ProductCatalog";
-import { CartPanel, type CartLine } from "@/components/pos/CartPanel";
+import { CartPanel } from "@/components/pos/CartPanel";
 import { PosPaymentDialog } from "@/components/pos/PosPaymentDialog";
 import { PosStickyBar } from "@/components/pos/PosStickyBar";
 import { PosResizableLayout } from "@/components/pos/PosResizableLayout";
 import { OrderSuccessDialog } from "@/components/pos/OrderSuccessDialog";
 import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
+import { usePosDraft } from "@/context/PosDraftContext";
+import { Button } from "@/components/ui/button";
+import { XCircle } from "lucide-react";
 
 let lineCounter = 0;
 function newLineKey(): string {
@@ -36,27 +40,46 @@ function newLineKey(): string {
 }
 
 export function PosScreen() {
+  const { t, labels } = useI18n();
   const { products, loading, refresh } = useCatalog();
-  const [phone, setPhone] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [isRegistered, setIsRegistered] = useState(false);
+  const {
+    phone,
+    firstName,
+    lastName,
+    isRegistered,
+    deliveryDate,
+    priority,
+    cart,
+    couponCode,
+    appliedCouponCode,
+    discountAmount,
+    couponMessage,
+    setPhone,
+    setFirstName,
+    setLastName,
+    setIsRegistered,
+    setDeliveryDate,
+    setPriority,
+    setCart,
+    setCouponCode,
+    setAppliedCouponCode,
+    setDiscountAmount,
+    setCouponMessage,
+    clearDraft,
+    hasDraft,
+  } = usePosDraft();
   const [creditDebt, setCreditDebt] = useState(0);
-  const [deliveryDate, setDeliveryDate] = useState(() =>
-    toDateKey(addDaysToDate(new Date(), 3))
-  );
-  const [priority, setPriority] = useState<OrderPriority>("normal");
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [couponCode, setCouponCode] = useState("");
-  const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
-  const [discountAmount, setDiscountAmount] = useState(0);
-  const [couponMessage, setCouponMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedOrder, setSavedOrder] = useState<Order | null>(null);
   const [savedReceipt, setSavedReceipt] = useState<ReceiptData | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [colorPalette, setColorPalette] = useState<ProductColorPreset[]>([]);
+
+  useEffect(() => {
+    void getProductColorPalette().then(setColorPalette);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(async () => {
@@ -109,10 +132,18 @@ export function PosScreen() {
 
   const handleSelectProduct = useCallback(async (product: Product) => {
     const serviceType: ServiceType = "dry_clean";
-    const lineSubtotal = await getServicePrice(product.id, serviceType);
+    const catalogPrice = await getServicePrice(product.id, serviceType);
     setCart((prev) => [
       ...prev,
-      { key: newLineKey(), product, serviceType, subtotal: lineSubtotal },
+      {
+        key: newLineKey(),
+        product,
+        serviceType,
+        originalPrice: catalogPrice,
+        salePrice: catalogPrice,
+        subtotal: catalogPrice,
+        color: null,
+      },
     ]);
   }, []);
 
@@ -121,14 +152,36 @@ export function PosScreen() {
       const updated = await Promise.all(
         cart.map(async (line) => {
           if (line.key !== key) return line;
-          const lineSubtotal = await getServicePrice(line.product.id, serviceType);
-          return { ...line, serviceType, subtotal: lineSubtotal };
+          const catalogPrice = await getServicePrice(line.product.id, serviceType);
+          return {
+            ...line,
+            serviceType,
+            originalPrice: catalogPrice,
+            salePrice: catalogPrice,
+            subtotal: catalogPrice,
+          };
         })
       );
       setCart(updated);
     },
     [cart]
   );
+
+  const handlePriceChange = useCallback((key: string, salePrice: number) => {
+    setCart((prev) =>
+      prev.map((line) =>
+        line.key === key
+          ? { ...line, salePrice, subtotal: salePrice }
+          : line
+      )
+    );
+  }, []);
+
+  const handleColorChange = useCallback((key: string, color: string | null) => {
+    setCart((prev) =>
+      prev.map((line) => (line.key === key ? { ...line, color } : line))
+    );
+  }, []);
 
   const handleRemove = useCallback((key: string) => {
     setCart((prev) => prev.filter((line) => line.key !== key));
@@ -137,7 +190,7 @@ export function PosScreen() {
   const handleApplyCoupon = useCallback(async () => {
     const result = await validateCouponCode(couponCode, subtotal);
     if (!result) {
-      setCouponMessage("Geçersiz veya süresi dolmuş kupon.");
+      setCouponMessage(t("pos.couponInvalid"));
       setAppliedCouponCode(null);
       setDiscountAmount(0);
       return;
@@ -145,9 +198,12 @@ export function PosScreen() {
     setAppliedCouponCode(result.coupon.code);
     setDiscountAmount(result.discount);
     setCouponMessage(
-      `${result.coupon.code} uygulandı: -${result.discount.toLocaleString("tr-TR")} TL`
+      t("pos.couponApplied", {
+        code: result.coupon.code,
+        amount: result.discount.toLocaleString("tr-TR"),
+      })
     );
-  }, [couponCode, subtotal]);
+  }, [couponCode, subtotal, t]);
 
   const handlePickCustomer = useCallback(async (customer: Customer) => {
     setPhone(customer.phone);
@@ -159,15 +215,19 @@ export function PosScreen() {
   }, []);
 
   const handleSave = useCallback(
-    async (amountPaid: number, paymentMethod: PaymentMethod) => {
+    async (
+      amountPaid: number,
+      paymentMethod: PaymentMethod,
+      paymentMode: PaymentMode
+    ) => {
       if (cart.length === 0) return;
       const trimmedPhone = phone.trim();
       if (!trimmedPhone) {
-        alert("Lütfen müşteri telefon numarasını girin.");
+        alert(t("pos.errorPhoneRequired"));
         return;
       }
       if (!firstName.trim()) {
-        alert("Lütfen müşteri adını girin.");
+        alert(t("pos.errorNameRequired"));
         return;
       }
 
@@ -181,7 +241,10 @@ export function PosScreen() {
         const fullName = customer
           ? formatCustomerName(customer)
           : [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
-        const paid = Math.min(Math.max(0, amountPaid), total);
+        const paid =
+          paymentMode === "credit" || paymentMode === "pay_on_delivery"
+            ? 0
+            : Math.min(Math.max(0, amountPaid), total);
         const shop = getShopProfile();
         const shopContact = shopProfileToContact(shop);
         const { order } = await createOrder({
@@ -189,6 +252,7 @@ export function PosScreen() {
           customerId: customer?.id ?? null,
           amountPaid: paid,
           paymentMethod,
+          paymentMode,
           couponCode: appliedCouponCode,
           discountAmount,
           deliveryDate,
@@ -197,6 +261,9 @@ export function PosScreen() {
             productId: line.product.id,
             serviceType: line.serviceType,
             subtotal: line.subtotal,
+            originalPrice: line.originalPrice,
+            salePrice: line.salePrice,
+            color: line.color ?? null,
           })),
         });
         setSavedOrder(order);
@@ -207,8 +274,12 @@ export function PosScreen() {
           customerName: fullName,
           lines: cart.map((line) => ({
             productName: line.product.name,
-            serviceLabel: SERVICE_LABELS[line.serviceType],
-            unitPrice: line.subtotal,
+            serviceLabel: labels.service[line.serviceType],
+            unitPrice: line.salePrice,
+            originalPrice: line.originalPrice,
+            colorLabel: line.color
+              ? resolveColorDisplay(colorPalette, line.color)?.label
+              : undefined,
           })),
           discountAmount,
           amountPaid: paid,
@@ -220,7 +291,7 @@ export function PosScreen() {
         await refresh();
       } catch (err) {
         console.error(err);
-        alert("Sipariş kaydedilemedi. Lütfen tekrar deneyin.");
+        alert(t("pos.errorSaveFailed"));
       } finally {
         setSaving(false);
       }
@@ -236,33 +307,34 @@ export function PosScreen() {
       priority,
       total,
       refresh,
+      colorPalette,
+      labels,
+      t,
     ]
   );
 
   const handleNewOrder = useCallback(() => {
-    setCart([]);
-    setPhone("");
-    setFirstName("");
-    setLastName("");
-    setIsRegistered(false);
-    setCreditDebt(0);
-    setDeliveryDate(toDateKey(addDaysToDate(new Date(), 3)));
-    setPriority("normal");
-    setCouponCode("");
-    setAppliedCouponCode(null);
-    setDiscountAmount(0);
-    setCouponMessage("");
+    clearDraft();
     setSavedOrder(null);
     setSavedReceipt(null);
     setShowSuccess(false);
-  }, []);
+  }, [clearDraft]);
+
+  const handleDiscardDraft = useCallback(() => {
+    if (
+      !confirm(t("pos.draftDiscardConfirm"))
+    ) {
+      return;
+    }
+    handleNewOrder();
+  }, [handleNewOrder, t]);
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-white dark:bg-slate-900">
         <div className="text-center">
           <div className="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-mint/30 border-t-mint" />
-          <p className="text-muted-foreground">Yükleniyor...</p>
+          <p className="text-muted-foreground">{t("pos.loading")}</p>
         </div>
       </div>
     );
@@ -270,6 +342,28 @@ export function PosScreen() {
 
   return (
     <div className="flex h-full flex-col bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
+      {hasDraft && (
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-mint/30 bg-mint-light/40 px-3 py-2 sm:px-4">
+          <p className="text-sm font-medium text-[#0f3d3a]">
+            {t("pos.draftBanner")}
+            {cart.length > 0 && (
+              <span className="ml-2 text-muted-foreground">
+                · {t("pos.draftItemCount", { count: String(cart.length) })}
+              </span>
+            )}
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0 gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={handleDiscardDraft}
+          >
+            <XCircle className="size-4" />
+            {t("pos.draftDiscard")}
+          </Button>
+        </div>
+      )}
       <CustomerPickerDialog
         open={customerPickerOpen}
         onOpenChange={setCustomerPickerOpen}
@@ -282,8 +376,8 @@ export function PosScreen() {
         subtotal={subtotal}
         discountAmount={discountAmount}
         saving={saving}
-        onConfirm={({ amountPaid, paymentMethod }) =>
-          void handleSave(amountPaid, paymentMethod)
+        onConfirm={({ amountPaid, paymentMethod, paymentMode }) =>
+          void handleSave(amountPaid, paymentMethod, paymentMode)
         }
       />
 
@@ -318,12 +412,15 @@ export function PosScreen() {
           cart={
             <CartPanel
               items={cart}
+              colorPalette={colorPalette}
               subtotal={subtotal}
               discountAmount={discountAmount}
               total={total}
               couponCode={couponCode}
               couponMessage={couponMessage}
               onServiceChange={(key, st) => void handleServiceChange(key, st)}
+              onPriceChange={handlePriceChange}
+              onColorChange={handleColorChange}
               onRemove={handleRemove}
               onCouponCodeChange={setCouponCode}
               onApplyCoupon={() => void handleApplyCoupon()}

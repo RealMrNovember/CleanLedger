@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { UpdateChecker } from "@/components/updater/UpdateChecker";
 import { useAuth } from "@/context/AuthContext";
 import { useI18n } from "@/context/I18nContext";
+import { LanguageSelector } from "@cleanledger/shared/i18n/LanguageSelector";
 import { Button } from "@/components/ui/button";
 import { GlobalSearchDialog } from "@/components/search/GlobalSearchDialog";
 
@@ -95,7 +96,7 @@ function SidebarContent({
 
 export function AppLayout() {
   const { organization, logout } = useAuth();
-  const { t } = useI18n();
+  const { t, locale, setLocale } = useI18n();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -135,14 +136,14 @@ export function AppLayout() {
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           className="flex items-center justify-center gap-2 border-t border-border/60 py-3 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          title={collapsed ? "Menüyü genişlet" : "Menüyü daralt"}
+          title={collapsed ? t("layout.expandSidebar") : t("layout.collapseSidebar")}
         >
           {collapsed ? (
             <PanelLeftOpen className="size-4" />
           ) : (
             <>
               <PanelLeftClose className="size-4" />
-              <span>Daralt</span>
+              <span>{t("common.collapse")}</span>
             </>
           )}
         </button>
@@ -153,7 +154,7 @@ export function AppLayout() {
           <button
             type="button"
             className="absolute inset-0 bg-black/40"
-            aria-label="Menüyü kapat"
+            aria-label={t("common.closeMenu")}
             onClick={() => setMobileOpen(false)}
           />
           <aside className="relative flex h-full w-72 max-w-[85vw] flex-col bg-card shadow-xl">
@@ -183,7 +184,7 @@ export function AppLayout() {
             type="button"
             className="inline-flex size-10 items-center justify-center rounded-xl border border-border/60 md:hidden"
             onClick={() => setMobileOpen(true)}
-            aria-label="Menüyü aç"
+            aria-label={t("common.openMenu")}
           >
             <Menu className="size-5" />
           </button>
@@ -209,10 +210,15 @@ export function AppLayout() {
             type="button"
             className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-border/60 sm:hidden"
             onClick={() => setSearchOpen(true)}
-            aria-label="Ara"
+            aria-label={t("common.search")}
           >
             <Search className="size-5" />
           </button>
+          <LanguageSelector
+            locale={locale}
+            onLocaleChange={setLocale}
+            variant="compact"
+          />
           <ThemeToggle />
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">

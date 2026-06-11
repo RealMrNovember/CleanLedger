@@ -13,33 +13,51 @@ import {
 } from "@/db/client";
 import { useAuth } from "@/context/AuthContext";
 import { ReportPrintView } from "@/components/reports/ReportPrintView";
-import { downloadReportPdf } from "@/lib/report-pdf";
+import { triggerReportPrint } from "@/lib/report-print";
 import { formatCurrency, formatDateTime, cn } from "@/lib/utils";
 import {
-  ORDER_STATUS_LABELS,
-  PAYMENT_STATUS_LABELS,
-  SERVICE_LABELS,
-  type OrderStatus,
-  type PaymentStatus,
-  type ServiceType,
-} from "@/db/schema";
+  hasLinePriceAdjustment,
+  linePriceCatalogTotal,
+} from "@cleanledger/shared/reports";
+import type { OrderStatus, PaymentStatus, ServiceType } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-const PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
-  { value: "daily", label: "Günlük" },
-  { value: "weekly", label: "Haftalık" },
-  { value: "monthly", label: "Aylık" },
-];
-
-const TYPE_OPTIONS: { value: ReportType; label: string; desc: string }[] = [
-  { value: "revenue", label: "Gelir & Tahsilat", desc: "Ciro, indirim, tahsilat ve cari özeti" },
-  { value: "customers", label: "Müşteri Listesi", desc: "Ziyaret sayısı ve harcama dağılımı" },
-  { value: "orders", label: "Yapılan İşler", desc: "Tüm siparişler, kalemler ve detaylar" },
-];
-
 export function ReportsScreen() {
+  const { t, labels } = useI18n();
+
+  const periodOptions: { value: ReportPeriod; label: string }[] = useMemo(
+    () => [
+      { value: "daily", label: t("reports.periodDaily") },
+      { value: "weekly", label: t("reports.periodWeekly") },
+      { value: "monthly", label: t("reports.periodMonthly") },
+    ],
+    [t]
+  );
+
+  const typeOptions: { value: ReportType; label: string; desc: string }[] =
+    useMemo(
+      () => [
+        {
+          value: "revenue",
+          label: t("reports.typeRevenueFull"),
+          desc: t("reports.typeRevenueFullDesc"),
+        },
+        {
+          value: "customers",
+          label: t("reports.typeCustomers"),
+          desc: t("reports.typeCustomersDesc"),
+        },
+        {
+          value: "orders",
+          label: t("reports.typeOrders"),
+          desc: t("reports.typeOrdersDesc"),
+        },
+      ],
+      [t]
+    );
   const { user } = useAuth();
   const companyName = user?.companyName ?? "CleanLedger";
   const [period, setPeriod] = useState<ReportPeriod>("daily");
@@ -48,7 +66,6 @@ export function ReportsScreen() {
     new Date().toISOString().slice(0, 10)
   );
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
   const [revenue, setRevenue] = useState<RevenueReportSummary | null>(null);
   const [customers, setCustomers] = useState<CustomerReportRow[]>([]);
   const [orders, setOrders] = useState<OrderWorkReportRow[]>([]);
@@ -77,22 +94,6 @@ export function ReportsScreen() {
     void load();
   }, [load]);
 
-  const handleExportPdf = async () => {
-    setExporting(true);
-    try {
-      await downloadReportPdf({
-        companyName,
-        reportType,
-        range,
-        revenue: revenue ?? undefined,
-        customers,
-        orders,
-      });
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <div className="shrink-0 border-b border-border/60 px-4 py-3 sm:px-6 sm:py-4">
@@ -100,19 +101,13 @@ export function ReportsScreen() {
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-bold">
               <BarChart3 className="size-7 text-trust" />
-              Raporlar
+              {t("reports.title")}
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Gelir, müşteri ve işlem raporlarını PDF olarak indirin
-            </p>
+            <p className="text-sm text-muted-foreground">{t("reports.subtitle")}</p>
           </div>
-          <Button
-            className="gap-2 print:hidden"
-            disabled={loading || exporting}
-            onClick={() => void handleExportPdf()}
-          >
+          <Button className="gap-2 print:hidden" onClick={triggerReportPrint}>
             <FileDown className="size-4" />
-            {exporting ? "Hazırlanıyor..." : "PDF İndir"}
+            {t("reports.print")}
           </Button>
         </div>
       </div>
@@ -120,13 +115,15 @@ export function ReportsScreen() {
       <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4 sm:p-6 lg:grid-cols-[280px_1fr]">
         <Card className="min-h-0 overflow-y-auto print:hidden">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Rapor Ayarları</CardTitle>
+            <CardTitle className="text-base">{t("reports.settingsTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div>
-              <label className="mb-2 block text-sm font-medium">Dönem</label>
+              <label className="mb-2 block text-sm font-medium">
+                {t("reports.periodLabel")}
+              </label>
               <div className="grid grid-cols-3 gap-2">
-                {PERIOD_OPTIONS.map((opt) => (
+                {periodOptions.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
@@ -147,7 +144,7 @@ export function ReportsScreen() {
             <div>
               <label className="mb-2 flex items-center gap-2 text-sm font-medium">
                 <CalendarRange className="size-4" />
-                Referans Tarihi
+                {t("reports.anchorDate")}
               </label>
               <Input
                 type="date"
@@ -158,9 +155,11 @@ export function ReportsScreen() {
             </div>
 
             <div>
-              <label className="mb-2 block text-sm font-medium">Rapor Türü</label>
+              <label className="mb-2 block text-sm font-medium">
+                {t("reports.typeLabel")}
+              </label>
               <div className="space-y-2">
-                {TYPE_OPTIONS.map((opt) => (
+                {typeOptions.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
@@ -183,17 +182,19 @@ export function ReportsScreen() {
 
         <Card className="flex min-h-0 flex-col overflow-hidden print:hidden">
           <CardHeader className="shrink-0">
-            <CardTitle>{TYPE_OPTIONS.find((t) => t.value === reportType)?.label}</CardTitle>
+            <CardTitle>
+              {typeOptions.find((o) => o.value === reportType)?.label}
+            </CardTitle>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {loading ? (
-              <p className="text-muted-foreground">Rapor hazırlanıyor...</p>
+              <p className="text-muted-foreground">{t("reports.loading")}</p>
             ) : reportType === "revenue" && revenue ? (
               <RevenuePreview summary={revenue} />
             ) : reportType === "customers" ? (
               <CustomersPreview rows={customers} />
             ) : (
-              <OrdersPreview rows={orders} />
+              <OrdersPreview rows={orders} labels={labels} />
             )}
           </CardContent>
         </Card>
@@ -212,21 +213,37 @@ export function ReportsScreen() {
 }
 
 function RevenuePreview({ summary }: { summary: RevenueReportSummary }) {
+  const { t } = useI18n();
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <Stat label="Sipariş" value={String(summary.orderCount)} />
-      <Stat label="Net Ciro" value={formatCurrency(summary.netRevenue)} accent />
-      <Stat label="Tahsil Edilen" value={formatCurrency(summary.collected)} />
-      <Stat label="Bekleyen / Cari" value={formatCurrency(summary.outstanding)} />
-      <Stat label="İndirimler" value={formatCurrency(summary.totalDiscounts)} />
-      <Stat label="Brüt Ciro" value={formatCurrency(summary.grossSubtotal)} />
+      <Stat label={t("reports.statOrders")} value={String(summary.orderCount)} />
+      <Stat label={t("reports.netRevenue")} value={formatCurrency(summary.netRevenue)} accent />
+      <Stat label={t("reports.collected")} value={formatCurrency(summary.collected)} />
+      <Stat label={t("reports.outstanding")} value={formatCurrency(summary.outstanding)} />
+      <Stat label={t("reports.couponDiscounts")} value={formatCurrency(summary.totalDiscounts)} />
+      <Stat label={t("reports.grossRevenue")} value={formatCurrency(summary.grossSubtotal)} />
+      <Stat
+        label={t("reports.catalogTotal")}
+        value={formatCurrency(summary.catalogSubtotal)}
+      />
+      <Stat
+        label={t("reports.lineDiscount")}
+        value={formatCurrency(summary.linePriceAdjustments)}
+      />
+      {summary.adjustedLineCount > 0 && (
+        <Stat
+          label={t("reports.discountedLines")}
+          value={String(summary.adjustedLineCount)}
+        />
+      )}
     </div>
   );
 }
 
 function CustomersPreview({ rows }: { rows: CustomerReportRow[] }) {
+  const { t } = useI18n();
   if (rows.length === 0) {
-    return <p className="text-muted-foreground">Bu dönemde müşteri ziyareti yok.</p>;
+    return <p className="text-muted-foreground">{t("reports.noCustomerVisits")}</p>;
   }
   return (
     <div className="space-y-2">
@@ -238,7 +255,11 @@ function CustomersPreview({ rows }: { rows: CustomerReportRow[] }) {
           <div>
             <p className="font-semibold">{row.customerName}</p>
             <p className="text-xs text-muted-foreground">
-              {row.phone} · {row.visitCount} ziyaret · Son: {formatDateTime(row.lastVisitAt)}
+              {t("reports.visitMeta", {
+                phone: row.phone,
+                count: String(row.visitCount),
+                date: formatDateTime(row.lastVisitAt),
+              })}
             </p>
           </div>
           <p className="font-bold text-trust">{formatCurrency(row.totalSpent)}</p>
@@ -248,9 +269,16 @@ function CustomersPreview({ rows }: { rows: CustomerReportRow[] }) {
   );
 }
 
-function OrdersPreview({ rows }: { rows: OrderWorkReportRow[] }) {
+function OrdersPreview({
+  rows,
+  labels,
+}: {
+  rows: OrderWorkReportRow[];
+  labels: ReturnType<typeof useI18n>["labels"];
+}) {
+  const { t, translateProduct } = useI18n();
   if (rows.length === 0) {
-    return <p className="text-muted-foreground">Bu dönemde işlem kaydı yok.</p>;
+    return <p className="text-muted-foreground">{t("reports.noOrdersInPeriod")}</p>;
   }
   return (
     <div className="space-y-3">
@@ -264,16 +292,30 @@ function OrdersPreview({ rows }: { rows: OrderWorkReportRow[] }) {
             {formatDateTime(order.createdAt)} · {customerName}
           </p>
           <p className="text-xs">
-            {ORDER_STATUS_LABELS[order.orderStatus as OrderStatus]} ·{" "}
-            {PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus]}
+            {labels.orderStatus[order.orderStatus as OrderStatus]} ·{" "}
+            {labels.paymentStatus[order.paymentStatus as PaymentStatus]}
           </p>
           <ul className="mt-2 space-y-1 text-sm">
             {items.map((item) => (
               <li key={item.id} className="flex justify-between gap-2 text-muted-foreground">
                 <span>
-                  {item.productName} ({SERVICE_LABELS[item.serviceType as ServiceType]})
+                  {translateProduct({ name: item.productName, iconName: null })} (
+                  {labels.service[item.serviceType as ServiceType]})
                 </span>
-                <span>{formatCurrency(item.subtotal)}</span>
+                <span className="text-right">
+                  {hasLinePriceAdjustment(item) ? (
+                    <>
+                      <span className="font-medium text-foreground">
+                        {formatCurrency(item.subtotal)}
+                      </span>
+                      <span className="ml-2 text-xs line-through">
+                        {formatCurrency(linePriceCatalogTotal(item))}
+                      </span>
+                    </>
+                  ) : (
+                    formatCurrency(item.subtotal)
+                  )}
+                </span>
               </li>
             ))}
           </ul>

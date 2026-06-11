@@ -13,10 +13,12 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { PasswordRecoveryLinks } from "@/components/auth/PasswordRecoveryLinks";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
 
 export function SignupPage() {
   const navigate = useNavigate();
   const { signup } = useAuth();
+  const { t, formatError } = useI18n();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
@@ -39,7 +41,7 @@ export function SignupPage() {
       !form.email.trim() ||
       !form.password.trim()
     ) {
-      setError("Lütfen zorunlu alanları doldurun.");
+      setError(t("auth.requiredFields"));
       return;
     }
 
@@ -48,7 +50,7 @@ export function SignupPage() {
       await signup(form);
       navigate("/dashboard/pos", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kayıt başarısız.");
+      setError(formatError(err));
     } finally {
       setSubmitting(false);
     }
@@ -64,10 +66,8 @@ export function SignupPage() {
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-lg">
           <div className="mb-8 text-center">
-            <h1 className="text-2xl font-bold">Ücretsiz Hesap Oluşturun</h1>
-            <p className="mt-2 text-muted">
-              14 günlük deneme sürümü otomatik başlar — kredi kartı gerekmez
-            </p>
+            <h1 className="text-2xl font-bold">{t("auth.signupTitle")}</h1>
+            <p className="mt-2 text-muted">{t("auth.signupSubtitle")}</p>
           </div>
 
           <form
@@ -83,62 +83,62 @@ export function SignupPage() {
             <div className="grid gap-5 sm:grid-cols-2">
               <InputField
                 icon={Building2}
-                label="Firma Adı"
+                label={t("auth.companyName")}
                 required
                 value={form.companyName}
                 onChange={(v) => update("companyName", v)}
-                placeholder="Örn: Papatya Kuru Temizleme"
+                placeholder={t("auth.companyNamePlaceholder")}
                 className="sm:col-span-2"
               />
               <InputField
                 icon={User}
-                label="Yetkili Adı"
+                label={t("auth.ownerName")}
                 required
                 value={form.ownerName}
                 onChange={(v) => update("ownerName", v)}
-                placeholder="Ad Soyad"
+                placeholder={t("auth.ownerNamePlaceholder")}
               />
               <InputField
                 icon={Phone}
-                label="Telefon"
+                label={t("auth.phone")}
                 required
                 type="tel"
                 value={form.phone}
                 onChange={(v) => update("phone", v)}
-                placeholder="05XX XXX XX XX"
+                placeholder={t("common.phonePlaceholder")}
               />
               <InputField
                 icon={Mail}
-                label="E-posta"
+                label={t("auth.email")}
                 required
                 type="email"
                 name="email"
                 autoComplete="username"
                 value={form.email}
                 onChange={(v) => update("email", v)}
-                placeholder="ornek@firma.com"
+                placeholder={t("common.emailPlaceholder")}
                 className="sm:col-span-2"
               />
               <InputField
                 icon={Lock}
-                label="Şifre"
+                label={t("auth.password")}
                 required
                 type="password"
                 name="password"
                 autoComplete="new-password"
                 value={form.password}
                 onChange={(v) => update("password", v)}
-                placeholder="••••••••"
+                placeholder={t("common.passwordPlaceholder")}
                 className="sm:col-span-2"
               />
               <InputField
                 icon={MapPin}
-                label="Şehir"
+                label={t("auth.city")}
                 name="city"
                 autoComplete="address-level2"
                 value={form.city}
                 onChange={(v) => update("city", v)}
-                placeholder="İstanbul"
+                placeholder={t("auth.cityPlaceholder")}
                 className="sm:col-span-2"
               />
             </div>
@@ -149,7 +149,7 @@ export function SignupPage() {
               className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-mint to-trust font-semibold text-white shadow-md transition hover:shadow-lg active:scale-[0.99] disabled:opacity-60"
             >
               {submitting && <Loader2 className="size-5 animate-spin" />}
-              {submitting ? "Kaydediliyor..." : "14 Gün Ücretsiz Başla"}
+              {submitting ? t("auth.signingUp") : t("auth.signup")}
             </button>
 
             <div className="mt-6 border-t border-slate-100 pt-6">
@@ -157,9 +157,9 @@ export function SignupPage() {
             </div>
 
             <p className="mt-6 text-center text-sm text-muted">
-              Zaten hesabınız var mı?{" "}
+              {t("auth.hasAccount")}{" "}
               <Link to="/login" className="font-semibold text-trust hover:underline">
-                Giriş yapın
+                {t("auth.loginLink")}
               </Link>
             </p>
           </form>

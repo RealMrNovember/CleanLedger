@@ -190,6 +190,14 @@
     background: #fff !important;
     border: none !important;
     box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  #cleanledger-receipt[data-thermal-width="58"] {
+    width: 220px;
+    max-width: 58mm;
+    font-size: 11px !important;
   }
 
   #cleanledger-receipt .receipt-logo-wrap {

@@ -1,3 +1,16 @@
+import {
+  buildPasswordResetWhatsAppUrl,
+  PASSWORD_RESET_GENERIC_MESSAGE,
+  validateResetPassword,
+} from "@cleanledger/shared";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
+
+export {
+  buildPasswordResetWhatsAppUrl,
+  PASSWORD_RESET_GENERIC_MESSAGE,
+  validateResetPassword,
+};
+
 export interface AuthUser {
   email: string;
   companyName: string;
@@ -20,6 +33,18 @@ export interface SignupInput {
   city: string;
   password: string;
   logoDataUrl?: string;
+}
+
+export class AuthApiError extends Error {
+  code?: string;
+  status?: number;
+
+  constructor(message: string, code?: string, status?: number) {
+    super(message);
+    this.name = "AuthApiError";
+    this.code = code;
+    this.status = status;
+  }
 }
 
 const SESSION_KEY = "cleanledger_session";
@@ -82,26 +107,49 @@ async function apiRequest<T>(
   const url =
     method === "GET" && token
       ? `${API_BASE}?action=${action}&token=${encodeURIComponent(token)}`
-      : `${API_BASE}?action=${action}`;
+      : method === "GET" && body?.token
+        ? `${API_BASE}?action=${action}&token=${encodeURIComponent(String(body.token))}`
+        : `${API_BASE}?action=${action}`;
 
-  const res = await fetch(url, {
-    method,
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+    });
+  } catch (err) {
+    const detail =
+      err instanceof Error ? err.message : "Ağ bağlantısı kurulamadı.";
+    throw new AuthApiError(`Auth API'ye ulaşılamadı: ${detail}`, "NETWORK_ERROR");
+  }
 
-  const data = (await res.json()) as T & { message?: string };
+  const data = (await res.json()) as T & { message?: string; code?: string };
   if (!res.ok) {
-    throw new Error((data as { message?: string }).message ?? "İstek başarısız.");
+    throw new AuthApiError(
+      data.message ?? ErrorCodes.AUTH_REQUEST_FAILED,
+      data.code,
+      res.status
+    );
   }
   return data;
+}
+
+function isAuthFailure(err: unknown): boolean {
+  if (!(err instanceof AuthApiError)) return false;
+  return (
+    err.code === "WRONG_PASSWORD" ||
+    err.code === "USER_NOT_FOUND" ||
+    err.code === "MISSING_FIELDS" ||
+    err.code === "PASSWORD_HASH_MISSING"
+  );
 }
 
 async function signupLocal(input: SignupInput): Promise<AuthSession> {
   const email = input.email.trim().toLowerCase();
   const users = getLocalUsers();
   if (users.some((u) => u.email.toLowerCase() === email)) {
-    throw new Error("Bu e-posta zaten kayıtlı.");
+    throw new AppError(ErrorCodes.EMAIL_EXISTS);
   }
   const token = makeToken();
   const user: StoredUser = {
@@ -130,7 +178,7 @@ async function loginLocal(
     (u) => u.email.toLowerCase() === email.trim().toLowerCase()
   );
   if (!found || found.password !== password) {
-    throw new Error("E-posta veya şifre hatalı.");
+    throw new AppError(ErrorCodes.WRONG_CREDENTIALS);
   }
   found.token = makeToken();
   saveLocalUsers(users);
@@ -161,6 +209,9 @@ export async function signup(input: SignupInput): Promise<AuthSession> {
     saveSession(session);
     return session;
   } catch {
+    if (import.meta.env.PROD) {
+      throw new AppError(ErrorCodes.SIGNUP_FAILED);
+    }
     return signupLocal(input);
   }
 }
@@ -179,8 +230,8 @@ export async function login(
     saveSession(session);
     return session;
   } catch (err) {
-    if (err instanceof Error && err.message !== "İstek başarısız.") {
-      throw err;
+    if (import.meta.env.PROD || isAuthFailure(err)) {
+      throw err instanceof Error ? err : new AppError(ErrorCodes.LOGIN_FAILED);
     }
     return loginLocal(email, password);
   }
@@ -198,7 +249,7 @@ export async function fetchProfile(token: string): Promise<AuthUser> {
   } catch {
     const users = getLocalUsers();
     const found = users.find((u) => u.token === token);
-    if (!found) throw new Error("Geçersiz oturum.");
+    if (!found) throw new AppError(ErrorCodes.INVALID_SESSION);
     return stripPassword(found);
   }
 }
@@ -218,10 +269,10 @@ async function changePasswordLocal(
     (u) => u.email.toLowerCase() === email.trim().toLowerCase()
   );
   if (!found) {
-    throw new Error("Hesap bulunamadı. Sunucu üzerinden kayıt olduysanız tekrar deneyin.");
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND);
   }
   if (found.password !== currentPassword) {
-    throw new Error("Mevcut şifre hatalı.");
+    throw new AppError(ErrorCodes.WRONG_CURRENT_PASSWORD);
   }
   found.password = newPassword;
   found.token = makeToken();
@@ -240,13 +291,13 @@ export async function changePassword(
   const newPassword = input.newPassword;
 
   if (!currentPassword || !newPassword) {
-    throw new Error("Mevcut ve yeni şifre gerekli.");
+    throw new AppError(ErrorCodes.PASSWORDS_REQUIRED);
   }
   if (newPassword.length < 6) {
-    throw new Error("Yeni şifre en az 6 karakter olmalı.");
+    throw new AppError(ErrorCodes.PASSWORD_TOO_SHORT);
   }
   if (currentPassword === newPassword) {
-    throw new Error("Yeni şifre mevcut şifreden farklı olmalı.");
+    throw new AppError(ErrorCodes.PASSWORD_UNCHANGED);
   }
 
   try {
@@ -264,14 +315,61 @@ export async function changePassword(
     return session;
   } catch (err) {
     if (
+      err instanceof AuthApiError &&
+      err.code !== "NETWORK_ERROR" &&
+      import.meta.env.PROD
+    ) {
+      throw err;
+    }
+    if (
       err instanceof Error &&
       err.message !== "İstek başarısız." &&
-      err.message !== "Geçersiz işlem."
+      err.message !== "Geçersiz işlem." &&
+      !(err instanceof AuthApiError && err.code === "NETWORK_ERROR")
     ) {
       throw err;
     }
     return changePasswordLocal(email, currentPassword, newPassword);
   }
+}
+
+export async function requestPasswordReset(email: string): Promise<string> {
+  const res = await apiRequest<{ success: boolean; message?: string }>(
+    "forgot_password",
+    "POST",
+    { email: email.trim().toLowerCase() }
+  );
+  return res.message ?? PASSWORD_RESET_GENERIC_MESSAGE;
+}
+
+export async function validateResetToken(token: string): Promise<boolean> {
+  try {
+    await apiRequest<{ success: boolean; valid: boolean }>(
+      "validate_reset_token",
+      "GET",
+      { token }
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function resetPassword(
+  token: string,
+  password: string
+): Promise<string> {
+  const validationError = validateResetPassword(password);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const res = await apiRequest<{ success: boolean; message?: string }>(
+    "reset_password",
+    "POST",
+    { token, password }
+  );
+  return res.message ?? "Parolanız güncellendi.";
 }
 
 /** Masaüstü uygulaması için export */

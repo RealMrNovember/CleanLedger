@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Banknote, CreditCard } from "lucide-react";
 import type { OrderWithMeta, PaymentMethod } from "@/db/schema";
-import { PAYMENT_METHOD_LABELS } from "@/db/schema";
 import { addOrderPayment } from "@/db/client";
 import { formatCurrency, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useI18n } from "@/context/I18nContext";
 
 interface AddPaymentDialogProps {
   open: boolean;
@@ -26,6 +26,7 @@ export function AddPaymentDialog({
   order,
   onAdded,
 }: AddPaymentDialogProps) {
+  const { t, labels } = useI18n();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [amount, setAmount] = useState("");
   const [saving, setSaving] = useState(false);
@@ -46,11 +47,13 @@ export function AddPaymentDialog({
 
     const value = Number(amount.replace(",", "."));
     if (!Number.isFinite(value) || value <= 0) {
-      setError("Geçerli bir tutar girin.");
+      setError(t("orders.addPaymentInvalidAmount"));
       return;
     }
     if (value > order.balanceDue + 0.001) {
-      setError(`En fazla ${formatCurrency(order.balanceDue)} ödenebilir.`);
+      setError(
+        t("orders.addPaymentMax", { amount: formatCurrency(order.balanceDue) })
+      );
       return;
     }
 
@@ -60,7 +63,7 @@ export function AddPaymentDialog({
       onAdded();
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ödeme eklenemedi.");
+      setError(err instanceof Error ? err.message : t("orders.addPaymentFailed"));
     } finally {
       setSaving(false);
     }
@@ -70,19 +73,19 @@ export function AddPaymentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Ödeme Ekle</DialogTitle>
+          <DialogTitle>{t("orders.addPaymentTitle")}</DialogTitle>
         </DialogHeader>
         {order && (
           <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
             <div className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Toplam</span>
+                <span className="text-muted-foreground">{t("orders.addPaymentTotal")}</span>
                 <span className="font-semibold">
                   {formatCurrency(order.totalAmount)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Kalan</span>
+                <span className="text-muted-foreground">{t("orders.addPaymentRemaining")}</span>
                 <span className="font-semibold text-[#b45309]">
                   {formatCurrency(order.balanceDue)}
                 </span>
@@ -90,7 +93,7 @@ export function AddPaymentDialog({
             </div>
 
             <div>
-              <p className="mb-2 text-sm font-medium">Ödeme Türü</p>
+              <p className="mb-2 text-sm font-medium">{t("orders.addPaymentType")}</p>
               <div className="grid grid-cols-2 gap-2">
                 {(["cash", "card"] as PaymentMethod[]).map((method) => (
                   <button
@@ -109,7 +112,7 @@ export function AddPaymentDialog({
                     ) : (
                       <CreditCard className="size-4" />
                     )}
-                    {PAYMENT_METHOD_LABELS[method]}
+                    {labels.paymentMethod[method]}
                   </button>
                 ))}
               </div>
@@ -117,7 +120,7 @@ export function AddPaymentDialog({
 
             <div>
               <label className="mb-2 block text-sm font-medium">
-                Ödenecek Tutar
+                {t("orders.addPaymentAmount")}
               </label>
               <Input
                 type="number"
@@ -132,7 +135,7 @@ export function AddPaymentDialog({
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <Button type="submit" className="w-full" disabled={saving}>
-              {saving ? "Kaydediliyor..." : "Ödeme Ekle"}
+              {saving ? t("common.saving") : t("orders.addPaymentTitle")}
             </Button>
           </form>
         )}

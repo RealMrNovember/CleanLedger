@@ -2,12 +2,15 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { LandingPage } from "@/pages/LandingPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SignupPage } from "@/pages/SignupPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { AccountPage } from "@/pages/AccountPage";
 import { ProtectedRoute, GuestRoute } from "@/components/ProtectedRoute";
 import { LicenseGate } from "@/components/LicenseGate";
 import { WebAppLayout } from "@/components/layout/WebAppLayout";
 import { CatalogProvider } from "@/hooks/useCatalog";
 import { SyncProvider } from "@/context/SyncContext";
+import { PosDraftProvider } from "@/context/PosDraftContext";
 import { PosScreen } from "@/screens/PosScreen";
 import { OrdersTrackingScreen } from "@/screens/OrdersTrackingScreen";
 import { CustomersScreen } from "@/screens/CustomersScreen";
@@ -22,6 +25,8 @@ export default function App() {
       <Route element={<GuestRoute />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
       </Route>
       <Route element={<ProtectedRoute />}>
         <Route element={<LicenseGate />}>
@@ -29,7 +34,9 @@ export default function App() {
             element={
               <SyncProvider>
                 <CatalogProvider>
-                  <WebAppLayout />
+                  <PosDraftProvider>
+                    <WebAppLayout />
+                  </PosDraftProvider>
                 </CatalogProvider>
               </SyncProvider>
             }

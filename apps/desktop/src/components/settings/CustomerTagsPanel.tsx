@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useI18n } from "@/context/I18nContext";
 import { cn } from "@/lib/utils";
 
 const COLOR_OPTIONS: { value: TagColor; label: string }[] = [
@@ -22,6 +23,7 @@ const COLOR_OPTIONS: { value: TagColor; label: string }[] = [
 ];
 
 export function CustomerTagsPanel() {
+  const { t } = useI18n();
   const [tags, setTags] = useState<CustomerTag[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ slug: "", label: "", color: "slate" as TagColor });
@@ -84,7 +86,7 @@ export function CustomerTagsPanel() {
   return (
     <Card className="mx-auto max-w-3xl">
       <CardHeader>
-        <CardTitle>Müşteri Etiketleri</CardTitle>
+        <CardTitle>{t("settings.tagsTitle")}</CardTitle>
         <p className="text-sm text-muted-foreground">
           POS ve müşteri listesinde görünen renkli etiketleri yönetin.
         </p>
@@ -97,7 +99,7 @@ export function CustomerTagsPanel() {
               <Input
                 value={form.label}
                 onChange={(e) => setForm({ ...form, label: e.target.value })}
-                placeholder="Örn: VIP"
+                placeholder={t("settings.tagNamePlaceholder")}
                 required
               />
             </div>
@@ -106,7 +108,7 @@ export function CustomerTagsPanel() {
               <Input
                 value={form.slug}
                 onChange={(e) => setForm({ ...form, slug: e.target.value })}
-                placeholder="vip"
+                placeholder={t("settings.tagSlugPlaceholder")}
               />
             </div>
             <div>

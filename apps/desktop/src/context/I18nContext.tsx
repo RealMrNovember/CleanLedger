@@ -14,19 +14,45 @@ import {
   saveLocale,
   translate,
 } from "@cleanledger/shared/i18n";
+import {
+  buildSchemaLabels,
+  type SchemaLabels,
+} from "@cleanledger/shared/i18n/labels";
+import {
+  translateColorLabel,
+  translateProductName,
+  resolveColorDisplayI18n,
+} from "@cleanledger/shared/i18n/catalog-mappers";
+import type { ProductColorPreset } from "@cleanledger/shared";
+import { translateAppError } from "@cleanledger/shared/i18n/translate-error";
 
 interface I18nContextValue {
   locale: Locale;
   setLocale: (locale: Locale) => void;
   t: (key: string, params?: Record<string, string>) => string;
+  labels: SchemaLabels;
+  translateProduct: (product: {
+    name: string;
+    iconName?: string | null;
+  }) => string;
+  translateColor: (preset: { label: string; hex: string }) => string;
+  resolveColor: (
+    palette: ProductColorPreset[],
+    value: string | null | undefined
+  ) => ProductColorPreset | null;
   locales: Locale[];
   localeLabels: typeof LOCALE_LABELS;
+  formatError: (err: unknown) => string;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => resolveLocale());
+  const [locale, setLocaleState] = useState<Locale>(() => {
+    const initial = resolveLocale();
+    if (typeof document !== "undefined") document.documentElement.lang = initial;
+    return initial;
+  });
 
   const setLocale = useCallback((next: Locale) => {
     saveLocale(next);
@@ -40,15 +66,44 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [locale]
   );
 
+  const labels = useMemo(() => buildSchemaLabels(t), [t]);
+
+  const translateProduct = useCallback(
+    (product: { name: string; iconName?: string | null }) =>
+      translateProductName(t, product),
+    [t]
+  );
+
+  const translateColor = useCallback(
+    (preset: { label: string; hex: string }) => translateColorLabel(t, preset),
+    [t]
+  );
+
+  const resolveColor = useCallback(
+    (palette: ProductColorPreset[], value: string | null | undefined) =>
+      resolveColorDisplayI18n(t, palette, value),
+    [t]
+  );
+
+  const formatError = useCallback(
+    (err: unknown) => translateAppError(t, err),
+    [t]
+  );
+
   const value = useMemo(
     () => ({
       locale,
       setLocale,
       t,
+      labels,
+      translateProduct,
+      translateColor,
+      resolveColor,
+      formatError,
       locales: SUPPORTED_LOCALES,
       localeLabels: LOCALE_LABELS,
     }),
-    [locale, setLocale, t]
+    [locale, setLocale, t, labels, translateProduct, translateColor, resolveColor, formatError]
   );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

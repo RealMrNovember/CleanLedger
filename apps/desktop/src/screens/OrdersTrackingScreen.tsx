@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode, type ComponentType, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode, type ComponentType } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarClock,
   Package,
@@ -14,27 +15,29 @@ import {
 import type {
   OrderWithMeta,
   OrderStatus,
+  OrderPriority,
   PaymentStatus,
   OrderPayment,
   PaymentMethod,
+  ItemStatus,
 } from "@/db/schema";
-import {
-  ORDER_STATUS_LABELS,
-  PAYMENT_STATUS_LABELS,
-  PAYMENT_METHOD_LABELS,
-} from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import {
   getActiveOrders,
   getDeliveredOrders,
   getOrderDashboardStats,
   getOrderPayments,
+  getOrderItemsForOrder,
   refundOrderPayment,
   updateOrderOrderStatus,
+  updateOrderItemStatus,
+  completeOrderDelivery,
   initDatabase,
 } from "@/db/client";
 import { useAuth } from "@/context/AuthContext";
 import { WhatsAppButton } from "@/components/WhatsAppButton";
 import { AddPaymentDialog } from "@/components/orders/AddPaymentDialog";
+import { DeliverPaymentDialog } from "@/components/orders/DeliverPaymentDialog";
 import { ReceiptPrintDialog } from "@/components/pos/ReceiptPrintDialog";
 import type { ReceiptData } from "@/components/pos/ReceiptPrintDialog";
 import { buildReceiptDataFromOrder } from "@/lib/order-receipt";
@@ -48,12 +51,28 @@ import { parseDateKey } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { OrdersResizableStatsLayout } from "@/components/orders/OrdersResizableStatsLayout";
+import { OrdersSearchBar } from "@/components/orders/OrdersSearchBar";
+import { OrderItemStatusSelect } from "@/components/orders/OrderItemStatusSelect";
+import { ColorBadgeRow, ColorDot } from "@/components/pos/ColorPickerPopover";
+import type { OrderItemDetail } from "@/db/client";
+import { getProductColorPalette } from "@/db/client";
+import { resolveColorDisplay, type ProductColorPreset } from "@cleanledger/shared";
+import {
+  filterTrackingOrders,
+  type OrderDeliveryFilter,
+} from "@cleanledger/shared";
 
 export function OrdersTrackingScreen() {
+  const { t, labels, translateProduct, translateColor } = useI18n();
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const shopName = user?.companyName ?? "Cicibyte CleanLedger";
-  const [tab, setTab] = useState<"active" | "delivered">("active");
-  const [orders, setOrders] = useState<OrderWithMeta[]>([]);
+  const [activeOrders, setActiveOrders] = useState<OrderWithMeta[]>([]);
+  const [deliveredOrders, setDeliveredOrders] = useState<OrderWithMeta[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [deliveryFilter, setDeliveryFilter] =
+    useState<OrderDeliveryFilter>("active");
   const [stats, setStats] = useState({
     tomorrowDeliveries: 0,
     itemsInShop: 0,
@@ -63,11 +82,27 @@ export function OrdersTrackingScreen() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [payments, setPayments] = useState<OrderPayment[]>([]);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [deliverDialogOpen, setDeliverDialogOpen] = useState(false);
   const [refundingId, setRefundingId] = useState<number | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [reprintLoading, setReprintLoading] = useState(false);
-  const [listReprintId, setListReprintId] = useState<number | null>(null);
+  const [orderItems, setOrderItems] = useState<OrderItemDetail[]>([]);
+  const [colorPalette, setColorPalette] = useState<ProductColorPreset[]>([]);
+  const [itemStatusSaving, setItemStatusSaving] = useState<number | null>(null);
+
+  useEffect(() => {
+    const state = location.state as { selectedOrderId?: number } | null;
+    if (state?.selectedOrderId) {
+      setSelectedId(state.selectedOrderId);
+      setDeliveryFilter("all");
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, navigate]);
+
+  useEffect(() => {
+    void getProductColorPalette().then(setColorPalette);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,23 +114,48 @@ export function OrdersTrackingScreen() {
         getDeliveredOrders(),
       ]);
       setStats(s);
-      setOrders(tab === "active" ? active : delivered);
+      setActiveOrders(active);
+      setDeliveredOrders(delivered);
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, []);
+
+  const orderPool = useMemo(() => {
+    if (deliveryFilter === "all") {
+      return [...activeOrders, ...deliveredOrders];
+    }
+    if (deliveryFilter === "delivered") {
+      return deliveredOrders;
+    }
+    return activeOrders;
+  }, [activeOrders, deliveredOrders, deliveryFilter]);
+
+  const orders = useMemo(
+    () => filterTrackingOrders(orderPool, searchQuery, deliveryFilter),
+    [orderPool, searchQuery, deliveryFilter]
+  );
+
+  useEffect(() => {
+    if (selectedId === null) return;
+    if (!orders.some((o) => o.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [orders, selectedId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const handler = () => void load();
-    window.addEventListener("cleanledger-sync", handler);
-    return () => window.removeEventListener("cleanledger-sync", handler);
-  }, [load]);
-
   const selected = orders.find((o) => o.id === selectedId);
+
+  useEffect(() => {
+    if (!selected) {
+      setOrderItems([]);
+      return;
+    }
+    void getOrderItemsForOrder(selected.id).then(setOrderItems);
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!selected) {
@@ -106,7 +166,7 @@ export function OrdersTrackingScreen() {
   }, [selected?.id, selected?.amountPaid, selected?.balanceDue]);
 
   const whatsAppForOrder = (order: OrderWithMeta) => {
-    const name = order.customerName ?? "Müşterimiz";
+    const name = order.customerName ?? t("orders.whatsappFallback");
     const debt = order.balanceDue ?? 0;
     const message =
       debt > 0
@@ -130,14 +190,36 @@ export function OrdersTrackingScreen() {
     await load();
   };
 
-  const handleMarkDelivered = async (id: number) => {
-    await updateOrderOrderStatus(id, "delivered");
+  const handleItemStatusChange = async (
+    itemId: number,
+    status: ItemStatus
+  ) => {
+    setItemStatusSaving(itemId);
+    try {
+      await updateOrderItemStatus(itemId, status);
+      await load();
+      if (selectedId) {
+        setOrderItems(await getOrderItemsForOrder(selectedId));
+      }
+    } finally {
+      setItemStatusSaving(null);
+    }
+  };
+
+  const handleMarkDelivered = async (order: OrderWithMeta) => {
+    const needsDeliveryPayment =
+      order.paymentMode === "pay_on_delivery" && order.balanceDue > 0;
+    if (needsDeliveryPayment) {
+      setDeliverDialogOpen(true);
+      return;
+    }
+    await completeOrderDelivery(order.id);
     setSelectedId(null);
     await load();
   };
 
   const handleRefundPayment = async (paymentId: number) => {
-    if (!window.confirm("Bu ödeme kaydını iade etmek istiyor musunuz?")) return;
+    if (!window.confirm(t("orders.refundConfirm"))) return;
     setRefundingId(paymentId);
     try {
       await refundOrderPayment(paymentId);
@@ -150,8 +232,7 @@ export function OrdersTrackingScreen() {
 
   const canUndoStatus =
     selected &&
-    ((tab === "active" && selected.orderStatus === "ready") ||
-      (tab === "delivered" && selected.orderStatus === "delivered"));
+    (selected.orderStatus === "ready" || selected.orderStatus === "delivered");
 
   const handleUndoStatus = async () => {
     if (!selected) return;
@@ -173,23 +254,9 @@ export function OrdersTrackingScreen() {
       setReceiptData(data);
       setReceiptOpen(true);
     } catch {
-      alert("Fiş oluşturulamadı.");
+      alert(t("orders.receiptFailed"));
     } finally {
       setReprintLoading(false);
-    }
-  };
-
-  const handleReprintFromList = async (order: OrderWithMeta, e: MouseEvent) => {
-    e.stopPropagation();
-    setListReprintId(order.id);
-    try {
-      const data = await buildReceiptDataFromOrder(order, order.customerName);
-      setReceiptData(data);
-      setReceiptOpen(true);
-    } catch {
-      alert("Fiş oluşturulamadı.");
-    } finally {
-      setListReprintId(null);
     }
   };
 
@@ -201,6 +268,15 @@ export function OrdersTrackingScreen() {
         order={selected ?? null}
         onAdded={load}
       />
+      <DeliverPaymentDialog
+        open={deliverDialogOpen}
+        onOpenChange={setDeliverDialogOpen}
+        order={selected ?? null}
+        onCompleted={() => {
+          setSelectedId(null);
+          void load();
+        }}
+      />
       <ReceiptPrintDialog
         open={receiptOpen}
         onOpenChange={setReceiptOpen}
@@ -208,10 +284,20 @@ export function OrdersTrackingScreen() {
       />
 
       <div className="shrink-0 border-b border-border/60 px-4 py-3 sm:px-6 sm:py-4">
-        <h1 className="text-xl font-bold sm:text-2xl">Sipariş Takibi</h1>
-        <p className="text-xs text-muted-foreground sm:text-sm">
-          Aktif siparişler, teslimat ve tahsilat yönetimi
-        </p>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-5">
+          <div className="shrink-0">
+            <h1 className="text-xl font-bold sm:text-2xl">{t("orders.title")}</h1>
+            <p className="text-xs text-muted-foreground sm:text-sm">{t("orders.subtitle")}</p>
+          </div>
+          <OrdersSearchBar
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            deliveryFilter={deliveryFilter}
+            onDeliveryFilterChange={setDeliveryFilter}
+            resultCount={orders.length}
+            className="lg:max-w-xl lg:flex-1"
+          />
+        </div>
       </div>
 
       <OrdersResizableStatsLayout
@@ -219,37 +305,25 @@ export function OrdersTrackingScreen() {
           <div className="grid grid-cols-3 gap-1.5 px-2 py-1 sm:gap-2 sm:px-3 sm:py-1.5 md:px-4">
             <StatCard
               icon={CalendarClock}
-              label="Yarın Teslim Edilecekler"
+              label={t("orders.statTomorrow")}
               value={String(stats.tomorrowDeliveries)}
               accent="trust"
             />
             <StatCard
               icon={Package}
-              label="İçerideki Ürün Sayısı"
+              label={t("orders.statInShop")}
               value={String(stats.itemsInShop)}
               accent="mint"
             />
             <StatCard
               icon={Wallet}
-              label="Bekleyen Tahsilat"
+              label={t("orders.statPendingPayment")}
               value={formatCurrency(stats.pendingCollection)}
               accent="warm"
             />
           </div>
         }
       >
-      <div className="flex shrink-0 gap-2 border-b border-border/60 px-4 sm:px-6">
-        <TabButton active={tab === "active"} onClick={() => setTab("active")}>
-          Aktif Siparişler
-        </TabButton>
-        <TabButton
-          active={tab === "delivered"}
-          onClick={() => setTab("delivered")}
-        >
-          Teslim Edilenler
-        </TabButton>
-      </div>
-
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:gap-4 sm:p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_min(100%,380px)] lg:grid-rows-1 lg:p-6">
         <div
           className={cn(
@@ -261,13 +335,17 @@ export function OrdersTrackingScreen() {
         >
           <div className="space-y-3">
           {loading ? (
-            <p className="text-muted-foreground">Yükleniyor...</p>
+            <p className="text-muted-foreground">{t("common.loading")}</p>
           ) : orders.length === 0 ? (
             <Card className="border-dashed">
               <CardContent className="py-12 text-center text-muted-foreground">
-                {tab === "active"
-                  ? "Aktif sipariş bulunmuyor."
-                  : "Henüz teslim edilmiş sipariş yok."}
+                {searchQuery.trim()
+                  ? t("orders.noSearchMatch")
+                  : deliveryFilter === "delivered"
+                    ? t("orders.noDelivered")
+                    : deliveryFilter === "all"
+                      ? t("orders.noActive")
+                      : t("orders.noActive")}
               </CardContent>
             </Card>
           ) : (
@@ -284,43 +362,59 @@ export function OrdersTrackingScreen() {
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-bold">{order.orderNumber}</p>
+                      <p className="truncate font-semibold text-ink">
+                        {order.customerName ?? t("common.unnamedCustomer")}
+                      </p>
                       {order.priority === "urgent" && (
-                        <Badge variant="urgent">ACİL</Badge>
+                        <Badge variant="urgent">{t("common.urgent")}</Badge>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm text-muted-foreground">
-                        {order.customerName ?? order.customerPhone}
-                      </p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground/80">
+                        {order.orderNumber}
+                      </span>
+                      <span aria-hidden className="text-border">·</span>
+                      <span>{order.customerPhone}</span>
                       <WhatsAppButton
                         href={whatsAppForOrder(order)}
-                        title="Müşteriye WhatsApp mesajı gönder"
+                        title={t("orders.whatsappSend")}
                       />
                     </div>
+                    {order.itemColors && order.itemColors.length > 0 && (
+                      <ColorBadgeRow colors={order.itemColors} className="mt-1.5" />
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-lg font-bold text-trust">
-                      {formatCurrency(order.totalAmount)}
-                    </p>
-                    <button
-                      type="button"
-                      title="Fişi yazdır"
-                      disabled={listReprintId === order.id}
-                      onClick={(e) => void handleReprintFromList(order, e)}
-                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground transition hover:border-mint/40 hover:bg-mint-light/40 hover:text-[#0f3d3a]"
-                    >
-                      <Printer className="size-4" />
-                    </button>
-                  </div>
+                  <p className="text-lg font-bold text-trust">
+                    {formatCurrency(order.totalAmount)}
+                  </p>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Badge variant="status">
-                    {ORDER_STATUS_LABELS[order.orderStatus as OrderStatus]}
+                    {labels.orderStatus[order.orderStatus as OrderStatus]}
                   </Badge>
-                  {order.orderStatus === "ready" && tab === "active" && (
+                  {order.itemActiveCount != null &&
+                    order.itemActiveCount > 0 &&
+                    order.itemReadyCount != null &&
+                    order.itemReadyCount > 0 &&
+                    order.itemReadyCount < order.itemActiveCount && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                        {t("orders.readyProgress", {
+                          ready: String(order.itemReadyCount),
+                          total: String(order.itemActiveCount),
+                        })}
+                      </span>
+                    )}
+                  {order.itemActiveCount != null &&
+                    order.itemActiveCount > 0 &&
+                    order.itemReadyCount === order.itemActiveCount &&
+                    order.orderStatus !== "delivered" && (
+                      <span className="rounded-full bg-mint/20 px-2 py-0.5 text-xs font-semibold text-[#0f3d3a]">
+                        {t("orders.allItemsReady")}
+                      </span>
+                    )}
+                  {order.orderStatus === "ready" && (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -330,7 +424,7 @@ export function OrdersTrackingScreen() {
                       className="inline-flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-xs font-semibold text-foreground hover:bg-muted/80"
                     >
                       <RotateCcw className="size-3" />
-                      Hazırlanıyor&apos;a Al
+                      {t("orders.markPreparing")}
                     </button>
                   )}
                   <Badge
@@ -342,17 +436,17 @@ export function OrdersTrackingScreen() {
                           : "unpaid"
                     }
                   >
-                    {PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus]}
+                    {labels.paymentStatus[order.paymentStatus as PaymentStatus]}
                   </Badge>
                   {order.balanceDue > 0 && (
                     <span className="text-xs font-medium text-[#b45309]">
-                      Kalan: {formatCurrency(order.balanceDue)}
+                      {t("orders.remaining")} {formatCurrency(order.balanceDue)}
                     </span>
                   )}
                   <span className="text-xs text-muted-foreground">
-                    Teslim:{" "}
+                    {t("orders.delivery")}{" "}
                     {parseDateKey(order.deliveryDate).toLocaleDateString("tr-TR")} ·{" "}
-                    {order.itemCount} parça
+                    {t("orders.piecesUnit", { count: String(order.itemCount) })}
                   </span>
                 </div>
               </button>
@@ -367,7 +461,22 @@ export function OrdersTrackingScreen() {
               <>
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
                   <div className="flex items-start justify-between gap-2">
-                    <h2 className="text-lg font-bold">{selected.orderNumber}</h2>
+                    <div className="min-w-0">
+                      <h2 className="truncate text-lg font-bold">
+                        {selected.customerName ?? t("common.unnamedCustomer")}
+                      </h2>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                        <span className="font-medium text-foreground/80">
+                          {selected.orderNumber}
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span>{selected.customerPhone}</span>
+                        <WhatsAppButton
+                          href={whatsAppForOrder(selected)}
+                          title={t("orders.whatsappSend")}
+                        />
+                      </div>
+                    </div>
                     {canUndoStatus && (
                       <button
                         type="button"
@@ -375,67 +484,118 @@ export function OrdersTrackingScreen() {
                         className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground transition hover:border-mint/40 hover:bg-mint-light/40 hover:text-[#0f3d3a]"
                         title={
                           selected.orderStatus === "ready"
-                            ? "Hazırlanıyor'a geri al"
-                            : "Hazır statüsüne geri al"
+                            ? t("orders.revertPreparing")
+                            : t("orders.revertReady")
                         }
                       >
                         <Undo2 className="size-4" />
                       </button>
                     )}
                   </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <p className="text-sm text-muted-foreground">
-                      {selected.customerName ?? selected.customerPhone}
-                    </p>
-                    <WhatsAppButton
-                      href={whatsAppForOrder(selected)}
-                      title="Müşteriye WhatsApp mesajı gönder"
-                    />
-                  </div>
                   <div className="my-3 grid grid-cols-1 gap-1.5 text-sm sm:grid-cols-2 sm:gap-x-4">
-                    <Row label="Tutar" value={formatCurrency(selected.totalAmount)} />
+                    <Row label={t("orders.labelAmount")} value={formatCurrency(selected.totalAmount)} />
                     <Row
-                      label="Ödenen"
+                      label={t("orders.labelPaid")}
                       value={formatCurrency(selected.amountPaid)}
                     />
                     <Row
-                      label="Kalan"
+                      label={t("orders.labelRemaining")}
                       value={formatCurrency(selected.balanceDue)}
                     />
                     <Row
-                      label="Teslim Tarihi"
+                      label={t("orders.labelDeliveryDate")}
                       value={parseDateKey(selected.deliveryDate).toLocaleDateString(
                         "tr-TR"
                       )}
                     />
                     <Row
-                      label="Durum"
+                      label={t("common.status")}
                       value={
-                        ORDER_STATUS_LABELS[selected.orderStatus as OrderStatus]
+                        labels.orderStatus[selected.orderStatus as OrderStatus]
                       }
                     />
                     <Row
-                      label="Ödeme"
+                      label={t("orders.labelPayment")}
                       value={
-                        PAYMENT_STATUS_LABELS[
+                        labels.paymentStatus[
                           selected.paymentStatus as PaymentStatus
                         ]
                       }
                     />
                     <Row
-                      label="Öncelik"
-                      value={selected.priority === "urgent" ? "Acil" : "Normal"}
+                      label={t("orders.labelPriority")}
+                      value={labels.orderPriority[selected.priority as OrderPriority]}
                     />
-                    <Row label="Parça" value={`${selected.itemCount} adet`} />
+                    <Row
+                      label={t("orders.labelPieces")}
+                      value={t("orders.piecesUnit", { count: String(selected.itemCount) })}
+                    />
                   </div>
+
+                  {orderItems.length > 0 && (
+                    <div className="mb-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t("orders.sectionItems")}
+                      </p>
+                      <ul className="space-y-1.5">
+                        {orderItems.map((item) => {
+                          const colorDisplay = resolveColorDisplay(
+                            colorPalette,
+                            item.color
+                          );
+                          return (
+                            <li
+                              key={item.id}
+                              className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <span className="font-medium">
+                                  {translateProduct({
+                                    name: item.productName,
+                                    iconName: null,
+                                  })}
+                                  {item.itemNumber ? (
+                                    <span className="ml-1.5 font-normal text-muted-foreground">
+                                      {item.itemNumber}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                {colorDisplay ? (
+                                  <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                                    <ColorDot hex={colorDisplay.hex} size="sm" />
+                                    {translateColor(colorDisplay)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="flex shrink-0 flex-col items-end gap-1">
+                                <OrderItemStatusSelect
+                                  value={item.itemStatus as ItemStatus}
+                                  disabled={
+                                    selected.orderStatus === "delivered" ||
+                                    itemStatusSaving === item.id
+                                  }
+                                  onChange={(status) =>
+                                    void handleItemStatusChange(item.id, status)
+                                  }
+                                />
+                                <span className="text-[10px] text-muted-foreground">
+                                  {labels.itemStatus[item.itemStatus as ItemStatus]}
+                                </span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
 
                   <div>
                     <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Ödeme Geçmişi
+                      {t("orders.sectionPayments")}
                     </p>
                     {payments.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        Henüz ödeme kaydı yok.
+                        {t("orders.noPayments")}
                       </p>
                     ) : (
                       <ul className="space-y-2">
@@ -454,12 +614,12 @@ export function OrdersTrackingScreen() {
                                 {formatCurrency(payment.amount)}
                                 {payment.refunded && (
                                   <span className="ml-2 text-xs text-muted-foreground">
-                                    (İade)
+                                    {t("orders.refund")}
                                   </span>
                                 )}
                               </p>
                               <p className="text-xs text-muted-foreground">
-                                {PAYMENT_METHOD_LABELS[
+                                {labels.paymentMethod[
                                   payment.paymentMethod as PaymentMethod
                                 ]}{" "}
                                 ·{" "}
@@ -474,7 +634,7 @@ export function OrdersTrackingScreen() {
                                 disabled={refundingId === payment.id}
                                 onClick={() => void handleRefundPayment(payment.id)}
                                 className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-destructive transition hover:bg-destructive/10"
-                                title="İade / Sil"
+                                title={t("orders.refundDelete")}
                               >
                                 <Trash2 className="size-4" />
                               </button>
@@ -486,7 +646,7 @@ export function OrdersTrackingScreen() {
                   </div>
                 </div>
 
-                {tab === "active" && (
+                {selected.orderStatus !== "delivered" && (
                   <div className="mt-3 shrink-0 space-y-2 border-t border-border/60 bg-card pt-3">
                     <Button
                       className="w-full gap-2"
@@ -495,7 +655,7 @@ export function OrdersTrackingScreen() {
                       onClick={() => void handleReprint()}
                     >
                       <Printer className="size-4" />
-                      {reprintLoading ? "Hazırlanıyor..." : "Fişi Yeniden Yazdır"}
+                      {reprintLoading ? t("orders.markingPreparing") : t("orders.reprint")}
                     </Button>
                     {selected.balanceDue > 0 && (
                       <Button
@@ -504,7 +664,7 @@ export function OrdersTrackingScreen() {
                         onClick={() => setPaymentDialogOpen(true)}
                       >
                         <CreditCard className="size-4" />
-                        Ödeme Alındı
+                        {t("orders.paymentReceived")}
                       </Button>
                     )}
                     {selected.orderStatus === "preparing" && (
@@ -514,7 +674,7 @@ export function OrdersTrackingScreen() {
                         onClick={() => void handleMarkReady(selected.id)}
                       >
                         <CheckCircle2 className="size-4" />
-                        Hazır Olarak İşaretle
+                        {t("orders.markReady")}
                       </Button>
                     )}
                     {selected.orderStatus === "ready" && (
@@ -524,21 +684,21 @@ export function OrdersTrackingScreen() {
                         onClick={() => void handleMarkPreparing(selected.id)}
                       >
                         <RotateCcw className="size-4" />
-                        Hazırlanıyor&apos;a Geri Al
+                        {t("orders.revertPreparing")}
                       </Button>
                     )}
                     {selected.orderStatus !== "delivered" && (
                       <Button
                         className="w-full gap-2"
-                        onClick={() => void handleMarkDelivered(selected.id)}
+                        onClick={() => void handleMarkDelivered(selected)}
                       >
                         <Truck className="size-4" />
-                        Teslim Edildi
+                        {t("orders.markDelivered")}
                       </Button>
                     )}
                   </div>
                 )}
-                {tab === "delivered" && selected.orderStatus === "delivered" && (
+                {selected.orderStatus === "delivered" && (
                   <div className="mt-3 shrink-0 space-y-2 border-t border-border/60 bg-card pt-3">
                     <Button
                       className="w-full gap-2"
@@ -547,7 +707,7 @@ export function OrdersTrackingScreen() {
                       onClick={() => void handleReprint()}
                     >
                       <Printer className="size-4" />
-                      {reprintLoading ? "Hazırlanıyor..." : "Fişi Yeniden Yazdır"}
+                      {reprintLoading ? t("orders.markingPreparing") : t("orders.reprint")}
                     </Button>
                     <Button
                       className="w-full gap-2"
@@ -555,14 +715,14 @@ export function OrdersTrackingScreen() {
                       onClick={() => void handleMarkReady(selected.id)}
                     >
                       <RotateCcw className="size-4" />
-                      Hazır Statüsüne Geri Al
+                      {t("orders.revertReady")}
                     </Button>
                   </div>
                 )}
               </>
             ) : (
               <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                Detay için sipariş seçin
+                {t("orders.selectOrder")}
               </p>
             )}
           </CardContent>
@@ -610,31 +770,6 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "border-b-2 px-4 py-3 text-sm font-semibold transition",
-        active
-          ? "border-mint text-[#0f3d3a]"
-          : "border-transparent text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

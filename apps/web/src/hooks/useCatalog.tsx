@@ -8,6 +8,8 @@ import {
 } from "react";
 import type { Product, ServicePrice } from "@/db/schema";
 import { getProducts, getServicePrices, initDatabase } from "@/db/client";
+import { SESSION_CLEARED_EVENT } from "@cleanledger/shared/tenant";
+import { useAuth } from "@/context/AuthContext";
 
 interface CatalogContextValue {
   products: Product[];
@@ -19,6 +21,7 @@ interface CatalogContextValue {
 const CatalogContext = createContext<CatalogContextValue | null>(null);
 
 export function CatalogProvider({ children }: { children: ReactNode }) {
+  const { token } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [servicePrices, setServicePrices] = useState<ServicePrice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,13 +39,28 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!token) {
+      setProducts([]);
+      setServicePrices([]);
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [refresh, token]);
 
   useEffect(() => {
     const handler = () => void refresh();
+    const onSessionCleared = () => {
+      setProducts([]);
+      setServicePrices([]);
+      setLoading(false);
+    };
     window.addEventListener("cleanledger-sync", handler);
-    return () => window.removeEventListener("cleanledger-sync", handler);
+    window.addEventListener(SESSION_CLEARED_EVENT, onSessionCleared);
+    return () => {
+      window.removeEventListener("cleanledger-sync", handler);
+      window.removeEventListener(SESSION_CLEARED_EVENT, onSessionCleared);
+    };
   }, [refresh]);
 
   return (

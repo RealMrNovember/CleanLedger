@@ -6,16 +6,22 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Admin-Secret');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
+require_once __DIR__ . '/lib/mail.php';
+require_once __DIR__ . '/lib/password-reset.php';
+
+$config = require __DIR__ . '/config.php';
 $dataDir = __DIR__ . '/data';
 $usersFile = $dataDir . '/users.json';
 $logFile = $dataDir . '/auth.log';
+$resetTokensFile = passwordResetTokensFile($dataDir);
+$resetRateFile = passwordResetRateFile($dataDir);
 
 if (!is_dir($dataDir)) {
     mkdir($dataDir, 0755, true);
@@ -120,11 +126,27 @@ if ($action === 'signup') {
     $users[] = $user;
     writeUsers($usersFile, $users);
 
+    $verifyUsers = readUsers($usersFile);
+    $written = null;
+    foreach ($verifyUsers as $vu) {
+        if (strtolower((string) ($vu['email'] ?? '')) === $email) {
+            $written = $vu;
+            break;
+        }
+    }
+    if (!$written || !password_verify($password, (string) ($written['passwordHash'] ?? ''))) {
+        authLog('signup_hash_verify_failed', ['email' => $email, 'user_id' => $user['id']]);
+    } else {
+        authLog('signup_success', ['email' => $email, 'user_id' => $user['id']]);
+    }
+
     respond(201, [
         'success' => true,
         'token' => $token,
+        'organizationId' => $email,
         'user' => [
             'email' => $user['email'],
+            'organizationId' => $email,
             'companyName' => $user['companyName'],
             'ownerName' => $user['ownerName'],
             'phone' => $user['phone'],
@@ -188,6 +210,10 @@ if ($action === 'login') {
                     'success' => false,
                     'code' => 'WRONG_PASSWORD',
                     'message' => 'E-posta veya şifre hatalı.',
+                    'support' => [
+                        'forgotPassword' => true,
+                        'whatsapp' => 'https://wa.me/905354895050',
+                    ],
                 ]);
             }
             $u['token'] = generateToken();
@@ -200,8 +226,10 @@ if ($action === 'login') {
             respond(200, [
                 'success' => true,
                 'token' => $u['token'],
+                'organizationId' => $email,
                 'user' => [
                     'email' => $u['email'],
+                    'organizationId' => $email,
                     'companyName' => $u['companyName'],
                     'ownerName' => $u['ownerName'],
                     'phone' => $u['phone'],
@@ -275,11 +303,14 @@ if ($action === 'change_password') {
             $u['passwordHash'] = password_hash($newPassword, PASSWORD_DEFAULT);
             $u['token'] = generateToken();
             writeUsers($usersFile, $users);
+            $orgEmail = strtolower(trim((string) $u['email']));
             respond(200, [
                 'success' => true,
                 'token' => $u['token'],
+                'organizationId' => $orgEmail,
                 'user' => [
                     'email' => $u['email'],
+                    'organizationId' => $orgEmail,
                     'companyName' => $u['companyName'],
                     'ownerName' => $u['ownerName'],
                     'phone' => $u['phone'],
@@ -292,6 +323,189 @@ if ($action === 'change_password') {
     unset($u);
 
     respond(401, ['success' => false, 'message' => 'Geçersiz oturum.']);
+}
+
+if ($action === 'forgot_password') {
+    $email = strtolower(trim($body['email'] ?? ''));
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $genericMessage = 'Kayıtlı bir hesabınız varsa sıfırlama bağlantısı e-posta adresinize gönderildi.';
+
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        respond(200, ['success' => true, 'message' => $genericMessage]);
+    }
+
+    if (passwordResetRateLimited($resetRateFile, $email, $ip)) {
+        authLog('password_reset_rate_limited', ['email' => $email, 'ip' => $ip]);
+        respond(200, ['success' => true, 'message' => $genericMessage]);
+    }
+
+    $userExists = false;
+    foreach ($users as $u) {
+        if (strtolower((string) ($u['email'] ?? '')) === $email) {
+            $userExists = true;
+            break;
+        }
+    }
+
+    if ($userExists) {
+        recordPasswordResetRateEvent($resetRateFile, $email, $ip);
+        $plainToken = createPasswordResetToken($resetTokensFile, $email);
+        $appUrl = rtrim((string) ($config['app_url'] ?? 'https://cleanledger.cicibyte.com'), '/');
+        $resetUrl = $appUrl . '/reset-password?token=' . urlencode($plainToken);
+
+        $companyName = '';
+        foreach ($users as $u) {
+            if (strtolower((string) ($u['email'] ?? '')) === $email) {
+                $companyName = (string) ($u['companyName'] ?? '');
+                break;
+            }
+        }
+
+        $sent = sendPasswordResetEmail($config, $email, $resetUrl, $companyName);
+        authLog('password_reset_requested', [
+            'email' => $email,
+            'mail_sent' => $sent,
+            'mail_configured' => mailIsConfigured($config['mail'] ?? []),
+        ]);
+    } else {
+        authLog('password_reset_unknown_email', ['email' => $email]);
+    }
+
+    respond(200, ['success' => true, 'message' => $genericMessage]);
+}
+
+if ($action === 'validate_reset_token') {
+    $token = trim($_GET['token'] ?? ($body['token'] ?? ''));
+    $result = validatePasswordResetToken($resetTokensFile, $token);
+
+    if (!$result['valid']) {
+        $messages = [
+            'expired' => 'Sıfırlama bağlantısının süresi dolmuş.',
+            'used' => 'Bu sıfırlama bağlantısı zaten kullanılmış.',
+            'not_found' => 'Geçersiz sıfırlama bağlantısı.',
+            'invalid_format' => 'Geçersiz sıfırlama bağlantısı.',
+        ];
+        respond(400, [
+            'success' => false,
+            'valid' => false,
+            'reason' => $result['reason'] ?? 'invalid',
+            'message' => $messages[$result['reason'] ?? ''] ?? 'Geçersiz sıfırlama bağlantısı.',
+        ]);
+    }
+
+    respond(200, ['success' => true, 'valid' => true]);
+}
+
+if ($action === 'reset_password') {
+    $token = trim($body['token'] ?? '');
+    $password = $body['password'] ?? '';
+
+    $validation = validatePasswordResetToken($resetTokensFile, $token);
+    if (!$validation['valid']) {
+        $messages = [
+            'expired' => 'Sıfırlama bağlantısının süresi dolmuş. Yeni bir talep oluşturun.',
+            'used' => 'Bu sıfırlama bağlantısı zaten kullanılmış.',
+            'not_found' => 'Geçersiz sıfırlama bağlantısı.',
+            'invalid_format' => 'Geçersiz sıfırlama bağlantısı.',
+        ];
+        respond(400, [
+            'success' => false,
+            'message' => $messages[$validation['reason'] ?? ''] ?? 'Geçersiz sıfırlama bağlantısı.',
+        ]);
+    }
+
+    $passwordError = validateNewPassword($password);
+    if ($passwordError !== null) {
+        respond(422, ['success' => false, 'message' => $passwordError]);
+    }
+
+    $email = consumePasswordResetToken($resetTokensFile, $token);
+    if ($email === null) {
+        respond(400, ['success' => false, 'message' => 'Geçersiz veya süresi dolmuş sıfırlama bağlantısı.']);
+    }
+
+    $updated = false;
+    foreach ($users as &$u) {
+        if (strtolower((string) ($u['email'] ?? '')) === $email) {
+            $u['passwordHash'] = password_hash($password, PASSWORD_DEFAULT);
+            $u['token'] = generateToken();
+            $updated = true;
+            break;
+        }
+    }
+    unset($u);
+
+    if (!$updated) {
+        respond(404, ['success' => false, 'message' => 'Hesap bulunamadı.']);
+    }
+
+    writeUsers($usersFile, $users);
+    authLog('password_reset_completed', ['email' => $email]);
+
+    respond(200, [
+        'success' => true,
+        'message' => 'Parolanız güncellendi. Giriş yapabilirsiniz.',
+    ]);
+}
+
+if ($action === 'admin_reset_password') {
+    $adminSecret = (string) ($config['admin']['secret'] ?? '');
+    $provided = trim($body['adminSecret'] ?? ($_SERVER['HTTP_X_ADMIN_SECRET'] ?? ''));
+
+    if ($adminSecret === '' || !hash_equals($adminSecret, $provided)) {
+        authLog('admin_reset_denied', ['ip' => $_SERVER['REMOTE_ADDR'] ?? '']);
+        respond(403, ['success' => false, 'message' => 'Yetkisiz.']);
+    }
+
+    $email = strtolower(trim($body['email'] ?? ''));
+    $newPassword = trim($body['newPassword'] ?? '');
+    $notify = (bool) ($body['notify'] ?? false);
+    $actor = trim($body['actor'] ?? 'license-admin');
+
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        respond(422, ['success' => false, 'message' => 'Geçerli e-posta gerekli.']);
+    }
+
+    if ($newPassword === '') {
+        $newPassword = generateTemporaryPassword();
+    } else {
+        $passwordError = validateNewPassword($newPassword);
+        if ($passwordError !== null) {
+            respond(422, ['success' => false, 'message' => $passwordError]);
+        }
+    }
+
+    $updated = false;
+    foreach ($users as &$u) {
+        if (strtolower((string) ($u['email'] ?? '')) === $email) {
+            $u['passwordHash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+            $u['token'] = generateToken();
+            $updated = true;
+            break;
+        }
+    }
+    unset($u);
+
+    if (!$updated) {
+        respond(404, ['success' => false, 'message' => 'CleanLedger hesabı bulunamadı.']);
+    }
+
+    writeUsers($usersFile, $users);
+    authLog('admin_password_reset', [
+        'email' => $email,
+        'actor' => $actor,
+        'notify' => $notify,
+    ]);
+
+    if ($notify) {
+        sendAdminPasswordResetNotice($config, $email);
+    }
+
+    respond(200, [
+        'success' => true,
+        'message' => 'Parola sıfırlandı.',
+        'temporaryPassword' => $newPassword,
+    ]);
 }
 
 respond(404, ['success' => false, 'message' => 'Geçersiz işlem.']);

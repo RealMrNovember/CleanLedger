@@ -29,9 +29,13 @@ import { saveShopProfile } from "@/lib/shop-profile";
 import {
   bindAuthSession,
   clearTenantContext,
+  purgeTenantSessionCache,
+  recoverTenantFromLegacyStorage,
   switchTenantContext,
   hydrateOrganizationProfileCache,
 } from "@/db/client";
+import { dispatchSessionCleared } from "@cleanledger/shared/tenant";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 
 interface AuthContextValue {
   user: AuthSession["user"] | null;
@@ -85,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (licenseKey: string) => {
       const activeSession = session ?? getSession();
       if (!activeSession?.user) {
-        throw new Error("Oturum bulunamadı.");
+        throw new AppError(ErrorCodes.SESSION_NOT_FOUND);
       }
       const snapshot = await activateLicense(
         getInstallationId(),
@@ -102,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const saved = getSession();
     if (saved?.user?.email) {
       switchTenantContext(saved.user.email);
+      recoverTenantFromLegacyStorage(saved.user.email);
     }
     setSession(saved);
     void hydrateOrganizationProfileCache();
@@ -140,6 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearLicenseCache();
       const s = await apiSignup(input);
       await bindAuthSession(s.user, s.token);
+      recoverTenantFromLegacyStorage(s.user.email);
       await saveShopProfile({
         companyName: input.companyName.trim(),
         phone: input.phone.trim(),
@@ -159,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearLicenseCache();
       const s = await apiLogin(email, password);
       await bindAuthSession(s.user, s.token);
+      recoverTenantFromLegacyStorage(s.user.email);
       await syncLicense(s);
       setSession(s);
       await runSyncPull(true);
@@ -171,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (input: ChangePasswordInput) => {
       const current = session ?? getSession();
       if (!current?.token || !current.user?.email) {
-        throw new Error("Oturum bulunamadı. Lütfen tekrar giriş yapın.");
+        throw new AppError(ErrorCodes.SESSION_REQUIRED);
       }
       const s = await apiChangePassword(
         current.token,
@@ -187,6 +194,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearSession();
     clearLicenseCache();
     clearTenantContext();
+    purgeTenantSessionCache();
+    dispatchSessionCleared();
     setSession(null);
     setLicense(null);
   }, []);

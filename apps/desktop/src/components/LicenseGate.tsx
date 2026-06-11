@@ -3,12 +3,13 @@ import { useAuth } from "@/context/AuthContext";
 import { LicenseLockedScreen } from "@/components/LicenseLockedScreen";
 
 export function LicenseGate() {
-  const { user, licenseUsable, refreshLicense, logout } = useAuth();
+  const { user, license, licenseUsable, refreshLicense, logout } = useAuth();
 
   if (!licenseUsable) {
     return (
       <LicenseLockedScreen
         companyName={user?.companyName}
+        lockReason={license?.lockReason}
         onRetry={refreshLicense}
         onLogout={() => void logout()}
       />

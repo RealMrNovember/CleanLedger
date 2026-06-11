@@ -12,8 +12,8 @@ import {
   Search,
 } from "lucide-react";
 import type { Customer, Order, OrderPriority } from "@/db/schema";
-import { ORDER_PRIORITY_LABELS } from "@/db/schema";
 import { getCustomers, getCustomerOrdersByPhone } from "@/db/client";
+import { useI18n } from "@/context/I18nContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,7 @@ export function CustomerPanel({
   priority,
   onPriorityChange,
 }: CustomerPanelProps) {
+  const { t, labels } = useI18n();
   const today = toDateKey(new Date());
   const tomorrow = toDateKey(addDaysToDate(new Date(), 1));
   const dayAfter = toDateKey(addDaysToDate(new Date(), 3));
@@ -132,19 +133,19 @@ export function CustomerPanel({
       <CardHeader className="shrink-0 pb-2">
         <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground/80">
           <Phone className="size-5 text-mint" />
-          Müşteri
+          {t("pos.customerTitle")}
         </CardTitle>
       </CardHeader>
 
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4 pt-0">
         <div className="shrink-0 space-y-2">
           <label className="text-sm font-medium text-muted-foreground">
-            Telefon Numarası
+            {t("pos.customerPhone")}
           </label>
           <Input
             type="tel"
             inputMode="tel"
-            placeholder="05XX XXX XX XX"
+            placeholder={t("common.phonePlaceholder")}
             value={phone}
             onChange={(e) => onPhoneChange(e.target.value)}
             className="h-11 w-full text-base font-medium tracking-wide"
@@ -156,7 +157,7 @@ export function CustomerPanel({
             onClick={() => setPickerOpen((v) => !v)}
           >
             <Users className="size-4" />
-            Müşteri Seç
+            {t("pos.customerPick")}
             {pickerOpen ? (
               <ChevronUp className="ml-auto size-4" />
             ) : (
@@ -172,18 +173,18 @@ export function CustomerPanel({
               <Input
                 value={pickerQuery}
                 onChange={(e) => setPickerQuery(e.target.value)}
-                placeholder="Ad, soyad veya telefon..."
+                placeholder={t("pos.customerPickerPlaceholder")}
                 className="h-9 pl-8 text-sm"
               />
             </div>
             <div className="max-h-40 overflow-y-auto rounded-lg border border-border/50 bg-background">
               {pickerLoading ? (
                 <p className="p-3 text-center text-xs text-muted-foreground">
-                  Yükleniyor...
+                  {t("common.loading")}
                 </p>
               ) : filteredCustomers.length === 0 ? (
                 <p className="p-3 text-center text-xs text-muted-foreground">
-                  Müşteri bulunamadı.
+                  {t("pos.customerPickerNotFound")}
                 </p>
               ) : (
                 <ul>
@@ -214,7 +215,9 @@ export function CustomerPanel({
           <div className="shrink-0 rounded-2xl border-2 border-red-300 bg-red-50 p-3 text-center shadow-sm dark:border-red-900 dark:bg-red-950/40">
             <AlertTriangle className="mx-auto mb-1 size-6 text-red-600" />
             <p className="text-sm font-bold text-red-700 dark:text-red-400">
-              Müşterinin {formatCurrency(creditDebt)} Borcu Var!
+              {t("pos.customerDebtWarning", {
+                amount: formatCurrency(creditDebt),
+              })}
             </p>
           </div>
         )}
@@ -222,13 +225,13 @@ export function CustomerPanel({
         <div className="shrink-0 space-y-2">
           <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <CalendarDays className="size-4 text-mint" />
-            Teslim Tarihi
+            {t("pos.deliveryDate")}
           </label>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { label: "Bugün", value: today },
-              { label: "Yarın", value: tomorrow },
-              { label: "+3 Gün", value: dayAfter },
+              { label: t("common.today"), value: today },
+              { label: t("common.tomorrow"), value: tomorrow },
+              { label: t("common.plus3Days"), value: dayAfter },
             ].map((opt) => (
               <Button
                 key={opt.value}
@@ -256,7 +259,7 @@ export function CustomerPanel({
         <div className="shrink-0 space-y-2">
           <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Zap className="size-4 text-[#e85d04]" />
-            Öncelik
+            {t("pos.priority")}
           </label>
           <div className="grid grid-cols-2 gap-2">
             {(["normal", "urgent"] as OrderPriority[]).map((p) => (
@@ -273,7 +276,7 @@ export function CustomerPanel({
                     : "bg-muted/60 text-muted-foreground hover:bg-muted"
                 )}
               >
-                {p === "urgent" ? "ACİL" : ORDER_PRIORITY_LABELS[p]}
+                {labels.orderPriority[p]}
               </button>
             ))}
           </div>
@@ -293,7 +296,7 @@ export function CustomerPanel({
                 )}
               >
                 <User className="size-3.5" />
-                Bilgiler
+                {t("customers.detailInfo")}
               </button>
               <button
                 type="button"
@@ -306,7 +309,7 @@ export function CustomerPanel({
                 )}
               >
                 <History className="size-3.5" />
-                Geçmiş İşlemler
+                {t("customers.detailHistory")}
               </button>
             </div>
 
@@ -316,24 +319,24 @@ export function CustomerPanel({
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                       <User className="size-3.5 text-trust" />
-                      {isRegistered ? "Müşteri Bilgisi" : "Yeni Müşteri Kaydı"}
+                      {isRegistered ? t("pos.customerRegistered") : t("pos.customerNew")}
                     </label>
                     <Input
                       value={firstName}
                       onChange={(e) => onFirstNameChange(e.target.value)}
-                      placeholder="Ad *"
+                      placeholder={`${t("common.firstName")} *`}
                       className="h-10"
                       required
                     />
                     <Input
                       value={lastName}
                       onChange={(e) => onLastNameChange(e.target.value)}
-                      placeholder="Soyad (opsiyonel)"
+                      placeholder={t("pos.customerLastNameOptional")}
                       className="h-10"
                     />
                     {isRegistered && firstName && (
                       <p className="text-xs text-mint">
-                        Kayıtlı müşteri — bilgileri güncelleyebilirsiniz.
+                        {t("pos.customerRegisteredHint")}
                       </p>
                     )}
                   </div>
@@ -345,11 +348,11 @@ export function CustomerPanel({
                   </p>
                   {historyLoading ? (
                     <p className="py-4 text-center text-sm text-muted-foreground">
-                      Yükleniyor...
+                      {t("common.loading")}
                     </p>
                   ) : historyOrders.length === 0 ? (
                     <p className="py-4 text-center text-sm text-muted-foreground">
-                      Bu müşteriye ait geçmiş sipariş yok.
+                      {t("customers.detailNoOrders")}
                     </p>
                   ) : (
                     <ul className="space-y-1.5">

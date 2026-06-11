@@ -1,18 +1,24 @@
 import { useState } from "react";
 import { Trash2, ShoppingBag, Tag, Plus, Wallet, ChevronDown, ChevronUp } from "lucide-react";
 import type { Product, ServiceType } from "@/db/schema";
-import { SERVICE_LABELS } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProductVisual } from "@/components/pos/ProductVisual";
+import { ColorPickerPopover } from "@/components/pos/ColorPickerPopover";
+import type { ProductColorPreset } from "@cleanledger/shared";
+import { cartLineMatchesColorQuery } from "@cleanledger/shared";
 import { cn, formatCurrency } from "@/lib/utils";
 
 export interface CartLine {
   key: string;
   product: Product;
   serviceType: ServiceType;
+  originalPrice: number;
+  salePrice: number;
   subtotal: number;
+  color?: string | null;
 }
 
 const SERVICE_OPTIONS: ServiceType[] = [
@@ -24,12 +30,15 @@ const SERVICE_OPTIONS: ServiceType[] = [
 
 interface CartPanelProps {
   items: CartLine[];
+  colorPalette: ProductColorPreset[];
   subtotal: number;
   discountAmount: number;
   total: number;
   couponCode: string;
   couponMessage?: string;
   onServiceChange: (key: string, serviceType: ServiceType) => void;
+  onPriceChange: (key: string, salePrice: number) => void;
+  onColorChange: (key: string, color: string | null) => void;
   onRemove: (key: string) => void;
   onCouponCodeChange: (code: string) => void;
   onApplyCoupon: () => void;
@@ -40,26 +49,34 @@ interface CartPanelProps {
 
 export function CartPanel({
   items,
+  colorPalette,
   subtotal,
   discountAmount,
   total,
   couponCode,
   couponMessage,
   onServiceChange,
+  onPriceChange,
+  onColorChange,
   onRemove,
   onCouponCodeChange,
   onApplyCoupon,
   onPay,
   hideMobileCheckout = false,
 }: CartPanelProps) {
+  const { t, labels, translateProduct } = useI18n();
   const [couponOpen, setCouponOpen] = useState(false);
+  const [colorFilter, setColorFilter] = useState("");
+  const visibleItems = items.filter((line) =>
+    cartLineMatchesColorQuery(line.color, colorFilter, colorPalette)
+  );
 
   return (
     <Card className="flex h-full w-full flex-col border-border/50 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
       <CardHeader className="pb-2 sm:pb-3">
         <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-gray-100">
           <ShoppingBag className="size-5 text-trust" />
-          Adisyon
+          {t("pos.cartTitle")}
           {items.length > 0 && (
             <span className="ml-auto rounded-full bg-mint/20 px-2.5 py-0.5 text-sm font-bold text-primary-foreground">
               {items.length}
@@ -69,19 +86,31 @@ export function CartPanel({
       </CardHeader>
 
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-3 pt-0 sm:gap-3 sm:p-5">
+        {items.length > 0 && (
+          <Input
+            value={colorFilter}
+            onChange={(e) => setColorFilter(e.target.value)}
+            placeholder={t("pos.cartColorFilter")}
+            className="h-9 shrink-0 text-sm"
+          />
+        )}
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 sm:space-y-3">
           {items.length === 0 ? (
             <div className="flex h-full min-h-[120px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border/80 bg-muted/30 p-4 text-center sm:min-h-[160px] sm:p-6">
               <ShoppingBag className="mb-2 size-8 text-muted-foreground/40 sm:mb-3 sm:size-10" />
               <p className="text-sm font-medium text-muted-foreground sm:text-base">
-                Henüz ürün eklenmedi
+                {t("pos.cartEmptyTitle")}
               </p>
               <p className="mt-1 text-xs text-muted-foreground/70 sm:text-sm">
-                Katalogdan ürün seçin
+                {t("pos.cartEmptyHint")}
               </p>
             </div>
+          ) : visibleItems.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {t("pos.cartNoColorMatch")}
+            </p>
           ) : (
-            items.map((line) => (
+            visibleItems.map((line) => (
                 <div
                   key={line.key}
                   className="rounded-xl border border-border/60 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-800/60 sm:rounded-2xl sm:p-4"
@@ -94,11 +123,38 @@ export function CartPanel({
                     />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold sm:text-base">
-                        {line.product.name}
+                        {translateProduct(line.product)}
                       </p>
-                      <p className="text-base font-bold text-trust sm:text-lg">
-                        {formatCurrency(line.subtotal)}
-                      </p>
+                      <ColorPickerPopover
+                        value={line.color}
+                        palette={colorPalette}
+                        onChange={(hex) => onColorChange(line.key, hex)}
+                        className="mt-1"
+                      />
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={line.salePrice}
+                          onChange={(e) => {
+                            const next = Number(e.target.value.replace(",", "."));
+                            if (Number.isFinite(next) && next >= 0) {
+                              onPriceChange(line.key, next);
+                            }
+                          }}
+                          className="h-9 w-24 text-base font-bold sm:h-10 sm:w-28"
+                          aria-label={t("pos.cartPriceAria", {
+                            product: translateProduct(line.product),
+                          })}
+                        />
+                        <span className="text-xs text-muted-foreground">TL</span>
+                        {line.salePrice < line.originalPrice - 0.001 && (
+                          <span className="text-xs text-muted-foreground line-through">
+                            {formatCurrency(line.originalPrice)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <Button
                       variant="ghost"
@@ -122,7 +178,7 @@ export function CartPanel({
                             : "bg-muted text-muted-foreground hover:bg-muted/80"
                         )}
                       >
-                        {SERVICE_LABELS[svc]}
+                        {labels.service[svc]}
                       </button>
                     ))}
                   </div>
@@ -139,7 +195,7 @@ export function CartPanel({
           >
             <span className="flex items-center gap-2">
               <Plus className="size-4" />
-              Kupon Ekle +
+              {t("pos.couponAdd")}
             </span>
             {couponOpen ? (
               <ChevronUp className="size-4" />
@@ -152,7 +208,7 @@ export function CartPanel({
             <div className="space-y-2 rounded-xl border border-border/60 bg-muted/20 p-3 dark:bg-slate-800/50">
               <div className="flex items-center gap-1 text-sm font-medium">
                 <Tag className="size-4" />
-                Kupon Kodu
+                {t("pos.couponCode")}
               </div>
               <div className="flex gap-2">
                 <Input
@@ -160,7 +216,7 @@ export function CartPanel({
                   onChange={(e) =>
                     onCouponCodeChange(e.target.value.toUpperCase())
                   }
-                  placeholder="Kupon kodu"
+                  placeholder={t("pos.couponPlaceholder")}
                   className="h-10"
                 />
                 <Button
@@ -170,7 +226,7 @@ export function CartPanel({
                   onClick={onApplyCoupon}
                   disabled={!couponCode.trim()}
                 >
-                  Uygula
+                  {t("common.apply")}
                 </Button>
               </div>
               {couponMessage && (
@@ -182,11 +238,11 @@ export function CartPanel({
           {discountAmount > 0 && (
             <div className="space-y-1 text-sm">
               <div className="flex justify-between text-muted-foreground">
-                <span>Ara Toplam</span>
+                <span>{t("common.subtotal")}</span>
                 <span>{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex justify-between text-mint">
-                <span>İndirim</span>
+                <span>{t("common.discount")}</span>
                 <span>-{formatCurrency(discountAmount)}</span>
               </div>
             </div>
@@ -200,7 +256,7 @@ export function CartPanel({
           >
             <div className="hidden items-end justify-end md:flex">
               <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                Toplam: {formatCurrency(total)}
+                {t("common.total")}: {formatCurrency(total)}
               </p>
             </div>
 
@@ -212,7 +268,7 @@ export function CartPanel({
               onClick={onPay}
             >
               <Wallet className="size-6" />
-              Öde
+              {t("pos.pay")}
             </Button>
           </div>
         </div>

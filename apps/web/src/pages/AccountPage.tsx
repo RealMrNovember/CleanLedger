@@ -2,21 +2,24 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogOut, Sparkles, KeyRound, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
 import { DownloadButton } from "@/components/DownloadButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { isLifetimeLicense } from "@/lib/license-display";
 import {
-  formatLicenseDetail,
-  getLicenseDisplay,
-  isLifetimeLicense,
-} from "@/lib/license-display";
+  formatLocalizedLicenseDetail,
+  getLocalizedLicenseDisplay,
+} from "@cleanledger/shared/i18n/license-i18n";
+import { LicenseManagementCard } from "@/components/license/LicenseManagementCard";
 import { cn } from "@/lib/utils";
 
 export function AccountPage() {
   const navigate = useNavigate();
-  const { user, license, loading, logout, changePassword } = useAuth();
-  const licenseDisplay = getLicenseDisplay(license);
+  const { t, locale } = useI18n();
+  const { user, license, loading, logout, changePassword, refreshLicense, activateLicenseKey } = useAuth();
+  const licenseDisplay = getLocalizedLicenseDisplay(t, locale, license);
   const licenseLoading = loading && !license;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -44,15 +47,15 @@ export function AccountPage() {
     setPasswordSuccess("");
 
     if (!currentPassword.trim()) {
-      setPasswordError("Mevcut şifrenizi girin.");
+      setPasswordError(t("validation.required"));
       return;
     }
     if (newPassword.length < 6) {
-      setPasswordError("Yeni şifre en az 6 karakter olmalı.");
+      setPasswordError(t("account.passwordMinHint"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordError("Yeni şifreler eşleşmiyor.");
+      setPasswordError(t("account.passwordMismatch"));
       return;
     }
 
@@ -65,10 +68,10 @@ export function AccountPage() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setPasswordSuccess("Şifreniz güncellendi.");
+      setPasswordSuccess(t("account.passwordChanged"));
     } catch (err) {
       setPasswordError(
-        err instanceof Error ? err.message : "Şifre güncellenemedi."
+        err instanceof Error ? err.message : t("auth.loginFailed")
       );
     } finally {
       setSaving(false);
@@ -79,10 +82,8 @@ export function AccountPage() {
     <div className="h-full overflow-y-auto bg-white p-4 text-gray-900 dark:bg-slate-900 dark:text-gray-100 md:p-6">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">Hesabım</h1>
-          <p className="text-sm text-muted-foreground">
-            Profil, güvenlik ve masaüstü uygulaması
-          </p>
+          <h1 className="text-2xl font-bold">{t("account.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("account.subtitle")}</p>
         </div>
 
         <Card className="bg-white dark:bg-slate-900">
@@ -92,16 +93,16 @@ export function AccountPage() {
             </div>
             <CardTitle>{user.companyName}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Web paneliniz aktif — veriler tarayıcınızda saklanır
+              {t("account.webPanelActive")}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Info label="Firma" value={user.companyName} />
-              <Info label="Yetkili" value={user.ownerName} />
-              <Info label="E-posta" value={user.email} />
-              <Info label="Telefon" value={user.phone || "—"} />
-              <Info label="Şehir" value={user.city || "—"} />
+              <Info label={t("auth.companyName")} value={user.companyName} />
+              <Info label={t("auth.ownerName")} value={user.ownerName} />
+              <Info label={t("auth.email")} value={user.email} />
+              <Info label={t("auth.phone")} value={user.phone || t("common.dash")} />
+              <Info label={t("auth.city")} value={user.city || t("common.dash")} />
               <div
                 className={cn(
                   "rounded-xl p-4 sm:col-span-2",
@@ -114,23 +115,29 @@ export function AccountPage() {
               >
                 <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                   <ShieldCheck className="size-4" />
-                  Lisans Durumu
+                  {t("license.recheck")}
                 </p>
                 <p className="mt-1 font-semibold">
-                  {licenseLoading ? "Kontrol ediliyor…" : licenseDisplay.label}
+                  {licenseLoading ? t("license.checking") : licenseDisplay.label}
                 </p>
                 {!licenseLoading && (
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {formatLicenseDetail(license)}
+                    {formatLocalizedLicenseDetail(t, locale, license)}
                   </p>
                 )}
               </div>
             </div>
 
+            <LicenseManagementCard
+              license={license}
+              loading={licenseLoading}
+              onActivateKey={activateLicenseKey}
+              onRefresh={refreshLicense}
+            />
+
             <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
               <p className="mb-3 text-sm text-muted-foreground">
-                Offline çalışma ve yazdırma için Windows masaüstü uygulamasını
-                indirin. Aynı e-posta ile giriş yapın.
+                {t("account.downloadDesktopHint")}
               </p>
               <DownloadButton variant="secondary" />
             </div>
@@ -141,7 +148,7 @@ export function AccountPage() {
               onClick={handleLogout}
             >
               <LogOut className="size-4" />
-              Çıkış Yap
+              {t("common.logout")}
             </Button>
           </CardContent>
         </Card>
@@ -150,42 +157,41 @@ export function AccountPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
               <KeyRound className="size-5 text-trust" />
-              Şifre Yönetimi
+              {t("auth.password")}
             </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Hesabınızın şifresini buradan güncelleyebilirsiniz. Masaüstü
-              uygulamasında da aynı şifre geçerlidir.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("account.subtitle")}</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={(e) => void handleChangePassword(e)} className="space-y-4">
               <PasswordField
-                label="Mevcut Şifre"
+                label={t("account.currentPassword")}
                 value={currentPassword}
                 onChange={setCurrentPassword}
                 show={showCurrent}
                 onToggle={() => setShowCurrent((v) => !v)}
                 autoComplete="current-password"
+                toggleAriaLabel={showCurrent ? t("common.close") : t("common.edit")}
               />
               <PasswordField
-                label="Yeni Şifre"
+                label={t("account.newPassword")}
                 value={newPassword}
                 onChange={setNewPassword}
                 show={showNew}
                 onToggle={() => setShowNew((v) => !v)}
                 autoComplete="new-password"
-                hint="En az 6 karakter"
+                hint={t("account.passwordMinHint")}
+                toggleAriaLabel={showNew ? t("common.close") : t("common.edit")}
               />
               <div>
                 <label className="mb-1 block text-sm font-medium">
-                  Yeni Şifre (Tekrar)
+                  {t("account.confirmPassword")}
                 </label>
                 <Input
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   autoComplete="new-password"
-                  placeholder="Yeni şifreyi tekrar girin"
+                  placeholder={t("common.passwordPlaceholder")}
                 />
               </div>
 
@@ -197,7 +203,7 @@ export function AccountPage() {
               )}
 
               <Button type="submit" disabled={saving}>
-                {saving ? "Kaydediliyor..." : "Şifreyi Güncelle"}
+                {saving ? t("common.saving") : t("common.save")}
               </Button>
             </form>
           </CardContent>
@@ -224,6 +230,7 @@ function PasswordField({
   onToggle,
   autoComplete,
   hint,
+  toggleAriaLabel,
 }: {
   label: string;
   value: string;
@@ -232,6 +239,7 @@ function PasswordField({
   onToggle: () => void;
   autoComplete: string;
   hint?: string;
+  toggleAriaLabel: string;
 }) {
   return (
     <div>
@@ -248,7 +256,7 @@ function PasswordField({
           type="button"
           onClick={onToggle}
           className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
-          aria-label={show ? "Şifreyi gizle" : "Şifreyi göster"}
+          aria-label={toggleAriaLabel}
         >
           {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
         </button>

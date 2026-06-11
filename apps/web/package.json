@@ -8,9 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "prebuild": "cp -f index.template.html index.html",
-    "deploy:live": "npm run build && node scripts/deploy-live.mjs"
+    "postbuild": "node scripts/deploy-live.mjs",
+    "deploy:live": "npm run build"
   },
   "dependencies": {
+    "@cleanledger/shared": "*",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-label": "^2.1.7",
     "@radix-ui/react-slot": "^1.2.3",

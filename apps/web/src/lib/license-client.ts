@@ -5,19 +5,29 @@ const BASE_URL = (
 const APP_CODE = import.meta.env.VITE_LICENSE_APP_CODE ?? "cleanledger";
 const API_KEY = import.meta.env.VITE_LICENSE_API_KEY ?? "";
 
-const CACHE_KEY = "cleanledger_license_cache";
+import type {
+  LicenseApiPayload,
+  LicensePlatform,
+  LicenseSnapshot,
+} from "@cleanledger/shared/license";
+import {
+  isLicenseUsable as sharedIsLicenseUsable,
+  mapLicenseApiPayload,
+  withLicenseLockReason,
+  buildLicenseRequestBody,
+} from "@cleanledger/shared/license";
+import { getDeviceName, getLicensePlatform } from "@/lib/license-device";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 
-export interface LicenseSnapshot {
-  status: string;
-  type: string;
-  expiresAt: string;
-  maxDevices: number;
-  registeredDevices: number;
-}
+export type { LicenseSnapshot };
+
+const CACHE_KEY = "cleanledger_license_cache";
 
 export interface LicenseContext {
   email?: string;
   clientName?: string;
+  deviceName?: string;
+  platform?: LicensePlatform;
 }
 
 interface LicenseCacheEntry {
@@ -29,14 +39,6 @@ interface LicenseApiEnvelope<T> {
   success: boolean;
   data?: T;
   message?: string;
-}
-
-interface LicenseServerData {
-  status: string;
-  type: string;
-  expires_at: string | null;
-  max_devices: number;
-  registered_devices: number;
 }
 
 export class LicenseApiError extends Error {
@@ -58,16 +60,6 @@ function endpoint(path: "trial" | "check" | "activate"): string {
   return `${BASE_URL}/api/v1/license/${path}`;
 }
 
-function mapSnapshot(data: LicenseServerData): LicenseSnapshot {
-  return {
-    status: data.status,
-    type: data.type,
-    expiresAt: data.expires_at ?? "",
-    maxDevices: data.max_devices,
-    registeredDevices: data.registered_devices,
-  };
-}
-
 function expiredSnapshot(type = "trial"): LicenseSnapshot {
   return {
     status: "expired",
@@ -75,6 +67,15 @@ function expiredSnapshot(type = "trial"): LicenseSnapshot {
     expiresAt: new Date(0).toISOString(),
     maxDevices: 0,
     registeredDevices: 0,
+    devices: [],
+  };
+}
+
+function resolveContext(context?: LicenseContext): LicenseContext {
+  return {
+    ...context,
+    deviceName: context?.deviceName ?? getDeviceName(),
+    platform: context?.platform ?? getLicensePlatform(),
   };
 }
 
@@ -100,57 +101,54 @@ async function postLicense<T>(
     );
   }
   if (!parsed.data) {
-    throw new Error("Lisans sunucusu boş yanıt döndü.");
+    throw new AppError(ErrorCodes.LICENSE_EMPTY_RESPONSE);
   }
   return parsed.data;
 }
 
 function buildBody(
   hwid: string,
-  context?: LicenseContext
+  context?: LicenseContext,
+  extra: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    app_code: APP_CODE,
-    hwid,
-  };
-
-  const email = normalizeEmail(context?.email);
-  if (email) body.email = email;
-  if (context?.clientName) body.client_name = context.clientName;
-
-  return body;
+  return buildLicenseRequestBody(APP_CODE, hwid, resolveContext(context), extra);
 }
 
 export async function startTrial(
   hwid: string,
   context?: LicenseContext
 ): Promise<LicenseSnapshot> {
-  const data = await postLicense<LicenseServerData>(
+  const data = await postLicense<LicenseApiPayload>(
     "trial",
     buildBody(hwid, context)
   );
-  return mapSnapshot(data);
+  return mapLicenseApiPayload(data);
 }
 
 export async function checkLicense(
   hwid: string,
   context?: LicenseContext
 ): Promise<LicenseSnapshot> {
-  const data = await postLicense<LicenseServerData>(
+  const data = await postLicense<LicenseApiPayload>(
     "check",
     buildBody(hwid, context)
   );
-  return mapSnapshot(data);
+  return mapLicenseApiPayload(data);
 }
 
-export function isLicenseUsable(snapshot: LicenseSnapshot | null): boolean {
-  if (!snapshot) return false;
-  if (!["active", "trial"].includes(snapshot.status)) return false;
-  if (snapshot.type === "lifetime") return true;
-  if (!snapshot.expiresAt) return false;
-  const expires = new Date(snapshot.expiresAt).getTime();
-  return Number.isFinite(expires) && expires > Date.now();
+export async function activateLicense(
+  hwid: string,
+  licenseKey: string,
+  context?: LicenseContext
+): Promise<LicenseSnapshot> {
+  const data = await postLicense<LicenseApiPayload>("activate", {
+    ...buildBody(hwid, context),
+    license_key: licenseKey.trim(),
+  });
+  return mapLicenseApiPayload(data);
 }
+
+export const isLicenseUsable = sharedIsLicenseUsable;
 
 export function saveLicenseCache(
   snapshot: LicenseSnapshot,
@@ -237,7 +235,7 @@ export async function ensureLicense(
   } catch (err) {
     if (err instanceof LicenseApiError) {
       if (err.httpStatus === 403) {
-        const locked = expiredSnapshot();
+        const locked = withLicenseLockReason(expiredSnapshot(), err.message);
         saveLicenseCache(locked, email);
         return locked;
       }
@@ -250,14 +248,16 @@ export async function ensureLicense(
     }
 
     const cached = getLicenseCache(email);
-    if (cached) return cached;
+    if (cached && isLicenseUsable(cached)) return cached;
 
     if (email) {
-      const locked = expiredSnapshot();
+      const message =
+        err instanceof Error ? err.message : "Lisans doğrulanamadı.";
+      const locked = withLicenseLockReason(expiredSnapshot(), message);
       saveLicenseCache(locked, email);
       return locked;
     }
 
-    throw new Error("Lisans doğrulanamadı.");
+    throw new AppError(ErrorCodes.LICENSE_VERIFY_FAILED);
   }
 }

@@ -1,6 +1,8 @@
-import type { MessageTree } from "./en";
+import type { MessageTree } from "./types";
+import { enCatalog } from "./en-catalog";
+import { mergeMessages } from "./merge";
 
-export const it: MessageTree = {
+export const it: MessageTree = mergeMessages(enCatalog, {
   nav: {
     pos: "Ordine (POS)",
     orders: "Tracciamento ordini",
@@ -17,25 +19,58 @@ export const it: MessageTree = {
     save: "Salva",
     cancel: "Annulla",
     collapse: "Comprimi",
+    expand: "Espandi menu",
+    closeMenu: "Chiudi menu",
+    openMenu: "Apri menu",
+    edit: "Modifica",
+    delete: "Elimina",
+    apply: "Applica",
+    reset: "Reimposta",
+    panel: "Il mio pannello",
   },
   auth: {
     loginTitle: "Accedi al tuo account",
-    loginSubtitle: "Accedi a licenza e pannello aziendale",
+    loginSubtitle: "Accedi a licenza e pannello gestionale",
     signupTitle: "Crea un account gratuito",
-    signupSubtitle: "Prova di 14 giorni — nessuna carta richiesta",
-    email: "E-mail",
-    password: "Password",
-    city: "Città",
-    companyName: "Nome azienda",
-    ownerName: "Responsabile",
-    phone: "Telefono",
+    signupSubtitle: "Prova 14 giorni — senza carta",
     login: "Accedi",
-    signup: "Inizia 14 giorni gratis",
+    signup: "Prova gratuita 14 giorni",
+    signupShort: "Registrazione gratuita",
     loggingIn: "Accesso…",
     signingUp: "Registrazione…",
+    forgotPassword: "Password dimenticata?",
+    noAccount: "Non hai un account?",
+    signupLink: "Registrati gratis",
+    hasAccount: "Hai già un account?",
+    loginLink: "Accedi",
   },
   settings: {
     language: "Lingua",
     languageHint: "Predefinita dal browser; puoi cambiarla qui.",
+    title: "Impostazioni",
+    subtitle: "Profilo, prodotti, prezzi e integrazioni",
   },
-};
+  landing: {
+    badge: "Software lavanderia a secco di nuova generazione",
+    heroTitle: "Prendere ordini non è mai stato così",
+    heroHighlight: "facile",
+    heroTitleEnd: "",
+    ctaTrial: "Prova gratuita 14 giorni",
+    ctaLogin: "Accedi al mio account",
+    featuresTitle: "Perché CleanLedger?",
+  },
+  pos: {
+    pay: "Paga",
+    cartTitle: "Comanda",
+    customerTitle: "Cliente",
+    successTitle: "Ordine salvato",
+  },
+  orders: {
+    title: "Tracciamento ordini",
+    subtitle: "Ordini attivi, consegna e incassi",
+  },
+  customers: {
+    title: "Clienti",
+    add: "Nuovo cliente",
+  },
+});

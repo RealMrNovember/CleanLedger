@@ -15,16 +15,18 @@ import { SyncStatusPanel } from "@/components/settings/SyncStatusPanel";
 import { ThermalPrintSettingsPanel } from "@/components/settings/ThermalPrintSettingsPanel";
 import { LanguageSettingsPanel } from "@/components/settings/LanguageSettingsPanel";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/context/I18nContext";
 
-const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
-  { value: "system", label: "Sistem" },
-  { value: "light", label: "Açık" },
-  { value: "dark", label: "Koyu" },
+const THEME_OPTIONS: { value: ThemeMode; labelKey: string }[] = [
+  { value: "system", labelKey: "settings.themeSystem" },
+  { value: "light", labelKey: "settings.themeLight" },
+  { value: "dark", labelKey: "settings.themeDark" },
 ];
 
 export function GeneralSettingsPanel() {
   const { user } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { t } = useI18n();
   const [form, setForm] = useState<ShopProfile>(() => getShopProfile());
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -36,7 +38,7 @@ export function GeneralSettingsPanel() {
   const handleSave = async () => {
     setError("");
     if (!form.companyName.trim()) {
-      setError("Dükkan adı zorunludur.");
+      setError(t("settings.shopNameRequired"));
       return;
     }
     await saveShopProfile(form);
@@ -51,17 +53,15 @@ export function GeneralSettingsPanel() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
           <Store className="size-5 text-mint" />
-          Genel — Dükkan Bilgileri
+          {t("settings.generalTitle")}
         </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Bu bilgiler fişin en üstünde ve müşteri mesajlarında kullanılır.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
       </CardHeader>
       <CardContent className="space-y-6">
         <div>
           <label className="mb-2 flex items-center gap-2 text-sm font-medium">
             <Moon className="size-4" />
-            Görünüm Modu
+            {t("settings.theme")}
           </label>
           <div className="grid grid-cols-3 gap-2">
             {THEME_OPTIONS.map((opt) => (
@@ -76,7 +76,7 @@ export function GeneralSettingsPanel() {
                     : "border-border/60 hover:border-mint/40"
                 )}
               >
-                {opt.label}
+                {t(opt.labelKey)}
               </button>
             ))}
           </div>
@@ -88,54 +88,54 @@ export function GeneralSettingsPanel() {
             onChange={(logoDataUrl) =>
               setForm((f) => ({ ...f, logoDataUrl }))
             }
-            label="İşletme Logosu"
-            hint="Fiş ve müşteri belgelerinde görünür. PNG, JPEG veya WebP."
+            label={t("settings.businessLogo")}
+            hint={t("settings.pricesHint")}
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">Dükkan Adı</label>
+          <label className="mb-1 block text-sm font-medium">{t("auth.companyName")}</label>
           <Input
             value={form.companyName}
             onChange={(e) =>
               setForm((f) => ({ ...f, companyName: e.target.value }))
             }
-            placeholder="Örn: Cicibyte Kuru Temizleme"
+            placeholder={t("auth.companyName")}
           />
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">Telefon</label>
+          <label className="mb-1 block text-sm font-medium">{t("common.phone")}</label>
           <Input
             type="tel"
             value={form.phone}
             onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-            placeholder="05XX XXX XX XX"
+            placeholder={t("common.phonePlaceholder")}
           />
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">E-posta</label>
+          <label className="mb-1 block text-sm font-medium">{t("auth.email")}</label>
           <Input
             type="email"
             value={form.email}
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-            placeholder="info@dukkan.com"
+            placeholder={t("common.emailPlaceholder")}
           />
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium">Adres</label>
+          <label className="mb-1 block text-sm font-medium">{t("common.address")}</label>
           <Input
             value={form.address ?? ""}
             onChange={(e) =>
               setForm((f) => ({ ...f, address: e.target.value }))
             }
-            placeholder="İşletme adresi (fişte görünür)"
+            placeholder={t("customers.formAddressPlaceholder")}
           />
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         {saved && (
-          <p className="text-sm font-medium text-mint">Kaydedildi — fişler güncellendi.</p>
+          <p className="text-sm font-medium text-mint">{t("settings.savedReceiptsUpdated")}</p>
         )}
-        <Button onClick={handleSave}>Kaydet</Button>
+        <Button onClick={handleSave}>{t("common.save")}</Button>
       </CardContent>
     </Card>
     <LanguageSettingsPanel />

@@ -48,6 +48,7 @@ import {
   type ProductColorPreset,
   computeCreateOrderFinancials,
 } from "@cleanledger/shared";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 import type { LocalDb, DatabaseSnapshot } from "@cleanledger/shared/schema/local-db";
 import { LOCAL_DB_SCHEMA_VERSION } from "@cleanledger/shared/schema/local-db";
 import {
@@ -112,9 +113,10 @@ import { formatItemNumber, formatOrderNumber } from "@cleanledger/shared/numberi
 import { normalizeOrganizationId } from "@cleanledger/shared/organization";
 import {
   ACTIVE_TENANT_SESSION_KEY,
+  bootstrapTenantWebStorage,
   entityBelongsToTenant,
+  hasBusinessData,
   isolateLocalDbForTenant,
-  resolveTenantWebStorageKey,
 } from "@cleanledger/shared/tenant";
 import type { AuthUser } from "@/lib/auth-api";
 import {
@@ -159,16 +161,47 @@ function getActiveTenantId(): string | null {
   return activeTenantId?.trim() || readPersistedTenantId()?.trim() || null;
 }
 
-/** Oturum e-postasına göre org-scoped localStorage anahtarına geçer. */
+function tenantWebStorage() {
+  return {
+    read: (key: string) => localStorage.getItem(key),
+    write: (key: string, value: string) => localStorage.setItem(key, value),
+  };
+}
+
+function parseStoredLocalDb(raw: string): LocalDb {
+  return finalizeLocalDb(JSON.parse(raw) as Record<string, unknown>);
+}
+
+function ensureTenantStorageBootstrapped(organizationEmail: string): string {
+  const tenantId = normalizeOrganizationId(organizationEmail);
+  return bootstrapTenantWebStorage(
+    WEB_STORAGE_KEY_V3,
+    tenantId,
+    tenantWebStorage(),
+    parseStoredLocalDb,
+    (db) => JSON.stringify(db)
+  );
+}
+
+/** Oturum e-postasına göre firmaya özel localStorage anahtarına geçer (legacy'den kurtarma dahil). */
 export function switchTenantContext(organizationEmail: string): void {
   const tenantId = normalizeOrganizationId(organizationEmail);
   persistActiveTenantId(tenantId);
-  activeWebStorageKey = resolveTenantWebStorageKey(WEB_STORAGE_KEY_V3, tenantId, {
-    read: (key) => localStorage.getItem(key),
-    write: (key, value) => localStorage.setItem(key, value),
-  });
+  activeWebStorageKey = ensureTenantStorageBootstrapped(organizationEmail);
   organizationProfileCache = null;
-  clearSyncUpdatedAt(tenantId);
+}
+
+/** Boş org snapshot varsa legacy global dosyadan firmaya özel veriyi yeniden oluşturur. */
+export function recoverTenantFromLegacyStorage(organizationEmail: string): boolean {
+  activeWebStorageKey = ensureTenantStorageBootstrapped(organizationEmail);
+  try {
+    const raw = localStorage.getItem(activeWebStorageKey);
+    if (!raw) return false;
+    const db = parseStoredLocalDb(raw);
+    return hasBusinessData(db);
+  } catch {
+    return false;
+  }
 }
 
 export function clearTenantContext(): void {
@@ -176,6 +209,11 @@ export function clearTenantContext(): void {
   activeWebStorageKey = WEB_STORAGE_KEY_V3;
   organizationProfileCache = null;
   clearSyncUpdatedAt();
+}
+
+/** Oturum kapanınca bellek önbelleği sıfırlanır (localStorage kiracı anahtarları korunur). */
+export function purgeTenantSessionCache(): void {
+  organizationProfileCache = null;
 }
 
 export async function bindAuthSession(
@@ -201,7 +239,7 @@ function tenantGuard<T extends { organizationId?: string | null }>(
 ): T | null {
   if (!entity) return null;
   const tenantId = getActiveTenantId();
-  if (!tenantId) return entity;
+  if (!tenantId) return null;
   if (!entityBelongsToTenant(entity, tenantId)) return null;
   return entity;
 }
@@ -282,12 +320,20 @@ function finalizeLocalDb(parsed: Record<string, unknown>): LocalDb {
 
 function loadLocalDb(): LocalDb {
   try {
-    const storageKey = activeWebStorageKey;
     const tenantId = getActiveTenantId();
+    if (tenantId) {
+      activeWebStorageKey = ensureTenantStorageBootstrapped(tenantId);
+    }
+    const storageKey = activeWebStorageKey;
     let raw = localStorage.getItem(storageKey);
     if (!raw && storageKey !== WEB_STORAGE_KEY_V3) {
-      const db = emptyLocalDb();
-      return tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
+      if (tenantId) {
+        activeWebStorageKey = ensureTenantStorageBootstrapped(tenantId);
+        raw = localStorage.getItem(activeWebStorageKey);
+      }
+      if (!raw) {
+        return emptyLocalDb();
+      }
     }
     if (!raw) {
       const v2 = localStorage.getItem(WEB_STORAGE_KEY_V2);
@@ -339,7 +385,11 @@ function loadLocalDb(): LocalDb {
 
 function saveLocalDb(db: LocalDb, options?: { silent?: boolean }): void {
   const tenantId = getActiveTenantId();
-  const payload = tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
+  if (!tenantId) {
+    console.warn("[CleanLedger] saveLocalDb engellendi: aktif kiracı yok.");
+    return;
+  }
+  const payload = isolateLocalDbForTenant(db, tenantId);
   localStorage.setItem(activeWebStorageKey, JSON.stringify(payload));
   if (!options?.silent) triggerSyncPush();
 }
@@ -1207,8 +1257,8 @@ export async function getCustomers(): Promise<Customer[]> {
     return rows.map(mapCustomer);
   }
   const tenantId = getActiveTenantId();
+  if (!tenantId) return [];
   const customers = loadLocalDb().customers;
-  if (!tenantId) return customers;
   return customers.filter((c) => entityBelongsToTenant(c, tenantId));
 }
 
@@ -1291,9 +1341,9 @@ export async function resetCustomerCredit(
   options: { note?: string; actorEmail?: string | null } = {}
 ): Promise<CreditReset> {
   const customer = await getCustomerById(customerId);
-  if (!customer) throw new Error("Müşteri bulunamadı");
+  if (!customer) throw new AppError(ErrorCodes.CUSTOMER_NOT_FOUND);
   if (customer.creditBalance <= 0.001) {
-    throw new Error("Sıfırlanacak cari bakiyesi yok.");
+    throw new AppError(ErrorCodes.NO_CREDIT_BALANCE);
   }
 
   const amountReset = customer.creditBalance;
@@ -1361,10 +1411,10 @@ export async function undoLastCreditReset(
   actorEmail?: string | null
 ): Promise<void> {
   const reset = await getLastActiveCreditReset(customerId);
-  if (!reset) throw new Error("Geri alınacak sıfırlama kaydı yok.");
+  if (!reset) throw new AppError(ErrorCodes.NO_CREDIT_RESET);
 
   const customer = await getCustomerById(customerId);
-  if (!customer) throw new Error("Müşteri bulunamadı");
+  if (!customer) throw new AppError(ErrorCodes.CUSTOMER_NOT_FOUND);
 
   const undoneAt = new Date().toISOString();
 
@@ -1536,9 +1586,7 @@ export async function updateCustomer(
 export async function deleteCustomer(id: number): Promise<void> {
   const { orders } = await getCustomerOrders(id);
   if (orders.length > 0) {
-    throw new Error(
-      "Bu müşterinin işlem geçmişi olduğu için silinemez. Tüm ziyaret ve sipariş kayıtları kalıcı olarak saklanır."
-    );
+    throw new AppError(ErrorCodes.CUSTOMER_HAS_ORDERS);
   }
 
   const customer = await getCustomerById(id);
@@ -2173,10 +2221,10 @@ export async function addOrderPayment(
   paymentMethod: PaymentMethod
 ): Promise<OrderPayment> {
   const order = await getOrderById(orderId);
-  if (!order) throw new Error("Sipariş bulunamadı");
+  if (!order) throw new AppError(ErrorCodes.ORDER_NOT_FOUND);
 
   const payAmount = Math.min(Math.max(0, amount), order.balanceDue);
-  if (payAmount <= 0) throw new Error("Ödenecek tutar yok");
+  if (payAmount <= 0) throw new AppError(ErrorCodes.NO_AMOUNT_DUE);
 
   const createdAt = new Date().toISOString();
   const payment = await insertOrderPaymentRecord(
@@ -2219,7 +2267,7 @@ export async function completeOrderDelivery(
   } = {}
 ): Promise<void> {
   const order = await getOrderById(orderId);
-  if (!order) throw new Error("Sipariş bulunamadı");
+  if (!order) throw new AppError(ErrorCodes.ORDER_NOT_FOUND);
 
   if (order.orderStatus === "delivered") return;
 
@@ -2229,7 +2277,7 @@ export async function completeOrderDelivery(
   if (mustCollect && !options.leaveOnCredit) {
     const amount = options.amount ?? 0;
     if (amount <= 0 || !options.paymentMethod) {
-      throw new Error("Teslimatta ödeme için tahsilat bilgisi gerekli.");
+      throw new AppError(ErrorCodes.DELIVERY_PAYMENT_REQUIRED);
     }
     await addOrderPayment(orderId, amount, options.paymentMethod);
   } else if (options.amount && options.amount > 0 && options.paymentMethod) {
@@ -2249,14 +2297,14 @@ export async function refundOrderPayment(paymentId: number): Promise<void> {
       [paymentId]
     );
     payment = rows[0] ? mapOrderPayment(rows[0]) : null;
-    if (!payment || payment.refunded) throw new Error("Ödeme kaydı bulunamadı");
+    if (!payment || payment.refunded) throw new AppError(ErrorCodes.PAYMENT_NOT_FOUND);
     await db.execute("UPDATE order_payments SET refunded = 1 WHERE id = ?", [
       paymentId,
     ]);
   } else {
     const local = loadLocalDb();
     payment = local.orderPayments.find((p) => p.id === paymentId) ?? null;
-    if (!payment || payment.refunded) throw new Error("Ödeme kaydı bulunamadı");
+    if (!payment || payment.refunded) throw new AppError(ErrorCodes.PAYMENT_NOT_FOUND);
     payment.refunded = 1;
     saveLocalDb(local);
   }
@@ -2585,7 +2633,7 @@ export async function updateCustomerTag(
 
 export async function deleteCustomerTag(id: number): Promise<void> {
   if (id <= 4) {
-    throw new Error("Varsayılan etiketler silinemez.");
+    throw new AppError(ErrorCodes.DEFAULT_TAGS_LOCKED);
   }
 
   const tag = await getCustomerTagById(id);
@@ -2850,7 +2898,7 @@ export async function updateWhatsappTemplate(
       [id]
     );
     template = rows[0] ? mapWhatsappTemplate(rows[0]) : null;
-    if (!template) throw new Error("Şablon bulunamadı");
+    if (!template) throw new AppError(ErrorCodes.TEMPLATE_NOT_FOUND);
     const next = {
       ...template,
       name: patch.name ?? template.name,
@@ -2866,7 +2914,7 @@ export async function updateWhatsappTemplate(
   } else {
     const local = loadLocalDb();
     const row = local.whatsappTemplates.find((t) => t.id === id);
-    if (!row) throw new Error("Şablon bulunamadı");
+    if (!row) throw new AppError(ErrorCodes.TEMPLATE_NOT_FOUND);
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.body !== undefined) row.body = patch.body;
     if (patch.active !== undefined) row.active = patch.active;
@@ -3090,9 +3138,7 @@ export async function getProductUsageCount(productId: number): Promise<number> {
 export async function deleteProduct(productId: number): Promise<void> {
   const usage = await getProductUsageCount(productId);
   if (usage > 0) {
-    throw new Error(
-      "Bu ürün geçmiş siparişlerde kullanıldığı için silinemez.",
-    );
+    throw new AppError(ErrorCodes.PRODUCT_IN_USE);
   }
 
   const product = (await getProducts()).find((p) => p.id === productId);
@@ -4150,14 +4196,19 @@ export async function applyRemoteSyncChanges(
   changes: SyncQueueEntry[]
 ): Promise<void> {
   if (!changes.length) return;
+  const orgId = getOrganizationId();
+  const scopedChanges = orgId
+    ? changes.filter((c) => entityBelongsToTenant(c, orgId))
+    : [];
+  if (!scopedChanges.length) return;
   if (isTauri()) {
     const data = await buildLocalDbFromTauri();
-    const merged = applySyncChanges(data, changes);
+    const merged = applySyncChanges(data, scopedChanges);
     await applyLocalDbToTauri(merged);
     window.dispatchEvent(new Event("cleanledger-sync"));
     return;
   }
-  const merged = applySyncChanges(loadLocalDb(), changes);
+  const merged = applySyncChanges(loadLocalDb(), scopedChanges);
   saveLocalDb(merged);
 }
 

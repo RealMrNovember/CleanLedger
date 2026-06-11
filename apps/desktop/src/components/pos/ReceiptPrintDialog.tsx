@@ -1,8 +1,7 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Printer } from "lucide-react";
-import type { Order } from "@/db/schema";
-import { PAYMENT_STATUS_LABELS } from "@/db/schema";
 import type { PaymentStatus } from "@/db/schema";
+import { useI18n } from "@/context/I18nContext";
 import {
   Dialog,
   DialogContent,
@@ -15,28 +14,15 @@ import { getShopProfile, shopProfileToContact } from "@/lib/shop-profile";
 import {
   buildReceiptSummaryRows,
   formatReceiptLineLabel,
-  triggerBrowserPrint,
-  type ShopContactInfo,
+  type ReceiptData,
 } from "@/lib/print-service";
+import {
+  applyThermalReceiptDomWidth,
+  printThermalCustomerReceipt,
+} from "@/lib/thermal-print";
 import { cn, formatCurrency } from "@/lib/utils";
 
-export interface ReceiptLine {
-  productName: string;
-  serviceLabel: string;
-  unitPrice: number;
-}
-
-export interface ReceiptData {
-  order: Order;
-  companyName: string;
-  customerPhone: string;
-  customerName?: string;
-  lines: ReceiptLine[];
-  discountAmount?: number;
-  amountPaid?: number;
-  balanceDue?: number;
-  shopContact?: ShopContactInfo;
-}
+export type { ReceiptData, ReceiptLine } from "@/lib/print-service";
 
 interface ReceiptPrintDialogProps {
   open: boolean;
@@ -49,13 +35,19 @@ export function ReceiptPrintDialog({
   onOpenChange,
   receipt,
 }: ReceiptPrintDialogProps) {
+  const { t, labels, locale, translateProduct, translateColor } = useI18n();
   const printRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || !receipt) return;
+    applyThermalReceiptDomWidth(printRef.current);
+  }, [open, receipt]);
 
   if (!receipt) return null;
 
   const shop = receipt.shopContact ?? shopProfileToContact(getShopProfile());
 
-  const today = new Date().toLocaleDateString("tr-TR", {
+  const today = new Date().toLocaleDateString(locale, {
     day: "2-digit",
     month: "long",
     year: "numeric",
@@ -65,11 +57,15 @@ export function ReceiptPrintDialog({
 
   const summaryRows = buildReceiptSummaryRows(receipt);
 
+  const handlePrint = async (preferEscPos = false) => {
+    await printThermalCustomerReceipt(receipt, { preferEscPos });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md print:shadow-none">
         <DialogHeader className="print:hidden">
-          <DialogTitle>Fiş Önizleme</DialogTitle>
+          <DialogTitle>{t("pos.receiptPreview")}</DialogTitle>
         </DialogHeader>
 
         <div
@@ -95,10 +91,10 @@ export function ReceiptPrintDialog({
               <p className="text-xs text-black/70">{shop.address}</p>
             )}
             <p className="mt-3 text-xs font-semibold">
-              Fiş No: {receipt.order.orderNumber}
+              {t("pos.receiptNoLabel")} {receipt.order.orderNumber}
             </p>
             <p className="text-xs">
-              Müşteri: {receipt.customerName ?? receipt.customerPhone}
+              {t("reports.receiptCustomer")} {receipt.customerName ?? receipt.customerPhone}
             </p>
             <p className="text-[10px] text-black/60">{today}</p>
           </div>
@@ -107,7 +103,13 @@ export function ReceiptPrintDialog({
             {receipt.lines.map((line, idx) => (
               <div key={idx} className="border-b border-black/10 pb-2 last:border-0">
                 <p className="font-semibold">
-                  {formatReceiptLineLabel(line.productName, line.serviceLabel)}
+                  {formatReceiptLineLabel(
+                    translateProduct({ name: line.productName, iconName: null }),
+                    line.serviceLabel
+                  )}
+                  {line.colorLabel
+                    ? ` · ${translateColor({ label: line.colorLabel, hex: "#000000" })}`
+                    : ""}
                 </p>
                 <div className="flex justify-end text-xs">
                   <span>{formatCurrency(line.unitPrice)}</span>
@@ -133,7 +135,7 @@ export function ReceiptPrintDialog({
               </div>
             ))}
             <p className="pt-2 text-center text-xs">
-              {PAYMENT_STATUS_LABELS[receipt.order.paymentStatus as PaymentStatus]}
+              {labels.paymentStatus[receipt.order.paymentStatus as PaymentStatus]}
             </p>
             <p className="pt-2 text-center text-[10px] font-semibold uppercase tracking-widest text-black/60">
               Cicibyte · CleanLedger
@@ -141,13 +143,20 @@ export function ReceiptPrintDialog({
           </div>
         </div>
 
-        <div className="flex gap-2 print:hidden">
+        <div className="flex flex-col gap-2 print:hidden sm:flex-row">
           <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>
-            Kapat
+            {t("common.close")}
           </Button>
-          <Button className="flex-1 gap-2" onClick={triggerBrowserPrint}>
+          <Button className="flex-1 gap-2" onClick={() => void handlePrint(false)}>
             <Printer className="size-4" />
-            Yazdır
+            {t("common.print")}
+          </Button>
+          <Button
+            variant="secondary"
+            className="flex-1"
+            onClick={() => void handlePrint(true)}
+          >
+            {t("pos.escPos")}
           </Button>
         </div>
       </DialogContent>

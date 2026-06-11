@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddProductDialog } from "@/components/settings/AddProductDialog";
 import { ProductSortableList } from "@/components/settings/ProductSortableList";
+import { useI18n } from "@/context/I18nContext";
 
 export function ProductManagementPanel() {
+  const { t } = useI18n();
   const { products, servicePrices, refresh } = useCatalog();
   const [addOpen, setAddOpen] = useState(false);
 
@@ -24,20 +26,18 @@ export function ProductManagementPanel() {
       <Card className="mx-auto max-w-5xl">
         <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <CardTitle>Ürün Yönetimi</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              POS kataloğuna ürün ekleyin, sıralayın veya silin.
-            </p>
+            <CardTitle>{t("settings.productsTitle")}</CardTitle>
+            <p className="text-sm text-muted-foreground">{t("settings.productsHint")}</p>
           </div>
           <Button className="shrink-0 gap-2" onClick={() => setAddOpen(true)}>
             <Plus className="size-4" />
-            Yeni Ürün Ekle
+            {t("pos.catalogAddProduct")}
           </Button>
         </CardHeader>
         <CardContent>
           {products.length === 0 ? (
             <p className="py-8 text-center text-muted-foreground">
-              Henüz ürün yok. Yeni ürün ekleyerek başlayın.
+              {t("settings.productsEmpty")}
             </p>
           ) : (
             <ProductSortableList

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ProductColorPreset } from "@cleanledger/shared";
 import { resolveColorDisplay } from "@cleanledger/shared";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/context/I18nContext";
 
 interface ColorPickerPopoverProps {
   value: string | null | undefined;
@@ -43,9 +44,11 @@ export function ColorPickerPopover({
   onChange,
   className,
 }: ColorPickerPopoverProps) {
+  const { t, translateColor } = useI18n();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const selected = resolveColorDisplay(palette, value);
+  const selectedLabel = selected ? translateColor(selected) : null;
 
   useEffect(() => {
     if (!open) return;
@@ -69,18 +72,20 @@ export function ColorPickerPopover({
             ? "border-border/60 bg-muted/30"
             : "border-dashed border-border/60 text-muted-foreground hover:border-mint/40 hover:text-foreground"
         )}
-        aria-label={selected ? `Renk: ${selected.label}` : "Renk seç"}
+        aria-label={
+          selectedLabel ? `${t("pos.colorLabel")} ${selectedLabel}` : t("pos.colorPick")
+        }
         aria-expanded={open}
       >
         {selected ? (
           <>
-            <ColorDot hex={selected.hex} label={selected.label} size="sm" />
-            <span className="max-w-[4.5rem] truncate">{selected.label}</span>
+            <ColorDot hex={selected.hex} label={selectedLabel ?? undefined} size="sm" />
+            <span className="max-w-[4.5rem] truncate">{selectedLabel}</span>
           </>
         ) : (
           <>
             <span className="inline-block size-3 rounded-full border border-dashed border-muted-foreground/50" />
-            <span>Renk</span>
+            <span>{t("pos.color")}</span>
           </>
         )}
       </button>
@@ -88,11 +93,13 @@ export function ColorPickerPopover({
       {open && (
         <div className="absolute left-0 top-full z-50 mt-1 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-600 dark:bg-slate-900">
           <div className="grid grid-cols-5 gap-1.5">
-            {palette.map((preset) => (
+            {palette.map((preset) => {
+              const presetLabel = translateColor(preset);
+              return (
               <button
                 key={preset.hex}
                 type="button"
-                title={preset.label}
+                title={presetLabel}
                 onClick={() => {
                   onChange(preset.hex);
                   setOpen(false);
@@ -102,12 +109,13 @@ export function ColorPickerPopover({
                   value === preset.hex && "ring-2 ring-mint ring-offset-1"
                 )}
               >
-                <ColorDot hex={preset.hex} label={preset.label} />
+                <ColorDot hex={preset.hex} label={presetLabel} />
                 <span className="w-full truncate text-center text-[9px] font-medium text-muted-foreground">
-                  {preset.label}
+                  {presetLabel}
                 </span>
               </button>
-            ))}
+            );
+            })}
           </div>
           {selected && (
             <button
@@ -118,7 +126,7 @@ export function ColorPickerPopover({
                 setOpen(false);
               }}
             >
-              Renk kaldır
+              {t("pos.colorRemove")}
             </button>
           )}
         </div>
@@ -134,19 +142,23 @@ export function ColorBadgeRow({
   colors: Array<{ label: string; hex: string }>;
   className?: string;
 }) {
+  const { translateColor } = useI18n();
   if (!colors.length) return null;
   return (
     <div className={cn("flex flex-wrap items-center gap-1", className)}>
-      {colors.map((c) => (
+      {colors.map((c) => {
+        const displayLabel = translateColor(c);
+        return (
         <span
           key={c.hex}
           className="inline-flex items-center gap-1 rounded-full bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-          title={c.label}
+          title={displayLabel}
         >
           <ColorDot hex={c.hex} size="sm" />
-          {c.label}
+          {displayLabel}
         </span>
-      ))}
+      );
+      })}
     </div>
   );
 }

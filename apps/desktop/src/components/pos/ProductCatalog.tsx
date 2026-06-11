@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { AddProductDialog } from "@/components/settings/AddProductDialog";
+import { useI18n } from "@/context/I18nContext";
 
 interface ProductCatalogProps {
   products: Product[];
@@ -18,6 +19,7 @@ export function ProductCatalog({
   onSelectProduct,
   onProductAdded,
 }: ProductCatalogProps) {
+  const { t, translateProduct } = useI18n();
   const [addOpen, setAddOpen] = useState(false);
 
   return (
@@ -30,10 +32,10 @@ export function ProductCatalog({
       <div className="flex h-full w-full flex-col pb-2 md:pb-0">
         <div className="mb-2 shrink-0 px-1 sm:mb-3">
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
-            Ürün Seç
+            {t("pos.catalogTitle")}
           </h2>
           <p className="text-xs text-muted-foreground sm:text-sm">
-            Eklemek için ürüne dokunun
+            {t("pos.catalogHint")}
           </p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -58,7 +60,7 @@ export function ProductCatalog({
                     interactive
                   />
                   <span className="line-clamp-2 text-center text-[10px] font-semibold leading-tight text-gray-900 dark:text-gray-100 sm:text-xs md:text-sm">
-                    {product.name}
+                    {translateProduct(product)}
                   </span>
                   <span className="text-[10px] font-medium text-muted-foreground sm:text-xs">
                     {formatCurrency(product.basePrice)}
@@ -74,7 +76,7 @@ export function ProductCatalog({
               onClick={() => setAddOpen(true)}
             >
               <Plus className="size-4" />
-              Yeni Ürün Ekle
+              {t("pos.catalogAddProduct")}
             </Button>
           </div>
         </div>

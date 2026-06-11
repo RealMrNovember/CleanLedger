@@ -29,9 +29,12 @@ import {
   hydrateOrganizationProfileCache,
   saveOrganizationSettings,
   clearOrganizationSettings,
+  purgeTenantSessionData,
   switchTenantContext,
   type OrganizationInput,
 } from "@/db/client";
+import { dispatchSessionCleared } from "@cleanledger/shared/tenant";
+import { AppError, ErrorCodes } from "@cleanledger/shared/errors";
 import type { OrganizationSettings } from "@/db/schema";
 import { formatUnknownError } from "@/lib/utils";
 
@@ -68,6 +71,8 @@ async function clearAuthState(): Promise<void> {
   persistSession(null);
   clearLicenseCache();
   await clearOrganizationSettings();
+  await purgeTenantSessionData();
+  dispatchSessionCleared();
 }
 
 interface AuthContextValue {
@@ -171,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (licenseKey: string) => {
       const activeSession = session ?? loadSession();
       if (!activeSession?.user) {
-        throw new Error("Oturum bulunamadı.");
+        throw new AppError(ErrorCodes.SESSION_NOT_FOUND);
       }
       const snapshot = await activateLicense(
         getInstallationId(),
@@ -215,7 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               window.dispatchEvent(new Event("cleanledger-sync"));
             }
           } catch (err) {
-            console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
+            void err;
           }
           initSyncListeners(() => {
             window.dispatchEvent(new Event("cleanledger-sync"));
@@ -224,11 +229,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await clearAuthState();
         }
       } catch (err) {
-        console.warn("[CleanLedger] Oturum geri yüklenemedi:", err);
+        void err;
         try {
           await clearAuthState();
         } catch (clearErr) {
-          console.warn("[CleanLedger] Oturum temizlenemedi:", clearErr);
+          void clearErr;
         }
       }
     })().finally(() => {
@@ -293,7 +298,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           window.dispatchEvent(new Event("cleanledger-sync"));
         }
       } catch (err) {
-        console.warn("[CleanLedger] Bulut senkronizasyonu atlandı:", err);
+        void err;
       }
     },
     [dbError, syncLicense]
@@ -303,7 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (input: ChangePasswordInput) => {
       const current = session ?? loadSession();
       if (!current?.token || !current.user?.email) {
-        throw new Error("Oturum bulunamadı. Lütfen tekrar giriş yapın.");
+        throw new AppError(ErrorCodes.SESSION_REQUIRED);
       }
       const next = await changePasswordRemote(
         current.token,

@@ -20,6 +20,7 @@ import {
   buildWhatsAppUrl,
 } from "@/lib/whatsapp";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 
 export function CustomersScreen() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const shopName = user?.companyName ?? "Cicibyte CleanLedger";
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -91,7 +93,7 @@ export function CustomersScreen() {
   };
 
   const handleDelete = async (id: number, displayName: string) => {
-    if (!confirm(`${displayName} müşterisini silmek istediğinize emin misiniz?`)) return;
+    if (!confirm(t("customers.deleteConfirm", { name: displayName }))) return;
     await deleteCustomer(id);
     await load();
   };
@@ -100,14 +102,14 @@ export function CustomersScreen() {
     <div className="flex h-full flex-col overflow-hidden bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100">
       <div className="flex items-center justify-between border-b border-border/60 px-6 py-4">
         <div>
-          <h1 className="text-2xl font-bold">Müşteriler</h1>
+          <h1 className="text-2xl font-bold">{t("customers.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            CRM — müşteri kayıtları ve sipariş geçmişi
+            {t("customers.subtitle")}
           </p>
         </div>
         <Button onClick={() => setDialogOpen(true)} className="gap-2">
           <Plus className="size-4" />
-          Yeni Müşteri
+          {t("customers.add")}
         </Button>
       </div>
 
@@ -115,7 +117,7 @@ export function CustomersScreen() {
         <div className="relative max-w-md">
           <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="İsim veya telefon ara..."
+            placeholder={t("customers.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-11"
@@ -127,7 +129,7 @@ export function CustomersScreen() {
         {filtered.length === 0 ? (
           <Card className="mx-auto max-w-md border-dashed">
             <CardContent className="py-12 text-center text-muted-foreground">
-              Henüz müşteri yok. Yeni müşteri ekleyin.
+              {t("customers.empty")}
             </CardContent>
           </Card>
         ) : (
@@ -162,23 +164,23 @@ export function CustomersScreen() {
                                 )
                               : buildOrderReadyMessage(formatCustomerName(c), shopName)
                           )}
-                          title="Müşteriye WhatsApp mesajı gönder"
+                          title={t("orders.whatsappSend")}
                         />
                         {meta?.hasActiveOrders && (
                           <span className="rounded-lg bg-[#fff4e6] px-2 py-0.5 text-xs font-semibold text-[#c2410c]">
-                            İçeride Ürünü Var
+                            {t("customers.badgeInShop")}
                           </span>
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground">{c.phone}</p>
                       {meta && meta.pendingAmount > 0 && (
                         <p className="mt-1 text-xs font-semibold text-[#b45309]">
-                          Bekleyen Tahsilat: {formatCurrency(meta.pendingAmount)}
+                          {t("customers.badgePending")} {formatCurrency(meta.pendingAmount)}
                         </p>
                       )}
                       {meta && meta.creditDebt > 0 && (
                         <p className="mt-1 text-xs font-semibold text-red-600">
-                          Cari Borç: {formatCurrency(meta.creditDebt)}
+                          {t("customers.badgeCredit")} {formatCurrency(meta.creditDebt)}
                         </p>
                       )}
                       {c.address && (
@@ -196,7 +198,7 @@ export function CustomersScreen() {
                     className="text-destructive"
                     onClick={() => void handleDelete(c.id, formatCustomerName(c))}
                   >
-                    Sil
+                    {t("common.delete")}
                   </Button>
                 </CardContent>
               </Card>
@@ -209,34 +211,34 @@ export function CustomersScreen() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Yeni Müşteri Ekle</DialogTitle>
+            <DialogTitle>{t("customers.addTitle")}</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
-            <Field label="Ad" required>
+            <Field label={t("common.firstName")} required>
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Ad"
+                placeholder={t("common.firstName")}
                 required
               />
             </Field>
-            <Field label="Soyad">
+            <Field label={t("common.lastName")}>
               <Input
                 value={form.lastName}
                 onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                placeholder="Soyad (opsiyonel)"
+                placeholder={t("pos.customerLastNameOptional")}
               />
             </Field>
-            <Field label="Telefon" required>
+            <Field label={t("common.phone")} required>
               <Input
                 type="tel"
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="05XX XXX XX XX"
+                placeholder={t("common.phonePlaceholder")}
                 required
               />
             </Field>
-            <Field label="Müşteri Tipi / Etiket">
+            <Field label={t("customers.formTag")}>
               <select
                 value={form.tagId}
                 onChange={(e) =>
@@ -251,24 +253,24 @@ export function CustomersScreen() {
                 ))}
               </select>
             </Field>
-            <Field label="Açık Adres (Evden al / Eve teslim)">
+            <Field label={t("common.address")}>
               <textarea
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
-                placeholder="Mahalle, sokak, bina no, daire..."
+                placeholder={t("customers.formAddressPlaceholder")}
                 className="min-h-[80px] w-full rounded-xl border-2 border-input bg-card px-4 py-3 text-sm outline-none focus:border-primary"
               />
             </Field>
-            <Field label="Notlar">
+            <Field label={t("common.notes")}>
               <textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Özel talimatlar, alerji vb."
+                placeholder={t("common.notes")}
                 className="min-h-[60px] w-full rounded-xl border-2 border-input bg-card px-4 py-3 text-sm outline-none focus:border-primary"
               />
             </Field>
             <Button type="submit" className="w-full" size="lg">
-              Kaydet
+              {t("common.save")}
             </Button>
           </form>
         </DialogContent>

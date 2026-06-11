@@ -948,12 +948,51 @@ EN, TR, AZ, RU, FR, IT
 - [x] Varsayılan: tarayıcı / cihaz dili; Ayarlar'dan manuel seçim
 - [x] Navigasyon, auth, ortak butonlar çevrildi
 - [x] Vitest: tüm locale dosyalarında anahtar paritesi doğrulaması
-- [ ] Kalan ekran metinleri (kademeli)
+- [x] **Faz 17.1** — tam kapsam, navbar dil seçici, landing page (aşağıda)
 
 ### Kabul kriterleri
 
 - [x] 6 dil dosyası yüklenir, eksik anahtar fallback (EN) çalışır
 - [x] `navigator.language` ile otomatik dil seçimi
+
+---
+
+## Faz 17.1 — Tam i18n Kapsamı & Hızlı Dil Seçici
+
+**Durum:** Uygulandı (2026-06-10)
+
+### Kapsam
+
+1. **%100 UI çevirisi (hedef)** — POS, sipariş takibi, müşteriler, ayarlar, raporlar, auth, lisans; `labels.*` ile enum metinleri (`SERVICE_LABELS`, `ORDER_STATUS_LABELS`, vb.)
+2. **Üst menü dil seçici** — `LanguageSelector` (bayrak + dil adı); arama ve koyu mod yanında; anında `localStorage` + re-render
+3. **Landing page** — `cleanledger.cicibyte.com` vitrin; tarayıcı dili + navbar dil seçici
+
+### Mimari
+
+```
+packages/shared/src/i18n/
+  messages/en-catalog.ts   ← anahtar kaynağı (~250+ key)
+  messages/tr-catalog.ts   ← tam TR çeviri
+  messages/{az,ru,fr,it}.ts ← mergeMessages ile override
+  labels.ts                ← buildSchemaLabels(t)
+  LanguageSelector.tsx     ← paylaşılan dropdown
+```
+
+### İşler
+
+- [x] Genişletilmiş mesaj kataloğu (`pos.*`, `orders.*`, `customers.*`, `settings.*`, `landing.*`, `enums.*`)
+- [x] `buildSchemaLabels` — şema enum etiketleri i18n
+- [x] Web `WebAppLayout` + landing `Navbar` — `LanguageSelector`
+- [x] Desktop `AppLayout` — `LanguageSelector`
+- [x] Landing page + Footer i18n
+- [x] Vitest `i18n-coverage.test.ts` — hardcoded Türkçe UI taraması
+
+### Kabul kriterleri
+
+- [x] Dil değişimi sayfa yenilemeden tüm uygulamayı günceller
+- [x] Landing + app aynı `LOCALE_STORAGE_KEY` kullanır
+- [x] EN fallback eksik anahtarda çalışır
+- [x] Coverage testi TSX dosyalarında bilinen Türkçe UI kalıplarını reddeder
 
 ---
 
@@ -974,9 +1013,56 @@ Kayıt sonrası tarayıcı "Şehir" alanını kullanıcı adı olarak öneriyor.
 
 ---
 
+## Faz 19 — Cross-Tenant İzolasyon (P0) 🚨 KRİTİK
+
+**Gereksinim:** Farklı e-posta/organization hesapları arasında veri sızıntısı matematiksel olarak sıfır olmalıdır.
+
+**Durum:** Uygulandı (2026-06-10)
+
+### Üç katmanlı mimari
+
+```
+1. Yerel DB (Web + Desktop)
+   Web: cleanledger_web_db_v3:{normalize(email)} — statik anahtar yok
+   Desktop: cleanledger_{safe_email}.db — hesap başına SQLite dosyası
+
+2. Backend (Bulut Sync)
+   sync.php → token'dan orgId → tüm push/pull org-scoped
+   Her change + snapshot satırı organizationId doğrulaması
+
+3. RAM / State
+   Logout veya token süresi → purgeTenantSession* + dispatchSessionCleared
+   CatalogProvider, SyncContext bellek temizliği
+```
+
+### İşler
+
+- [x] `packages/shared/src/tenant/sqlite.ts` — tenant SQLite dosya adı
+- [x] `packages/shared/src/tenant/session.ts` — `SESSION_CLEARED_EVENT`
+- [x] `packages/shared/src/sync/merge.ts` — `changeMatchesTenant` strict guard
+- [x] Web: org-scoped localStorage, `purgeTenantSessionCache`, sync pull org mismatch reddi
+- [x] Desktop: org-scoped SQLite, legacy migrate, `purgeTenantSessionData`
+- [x] PHP `sync-org.php`: `cl_change_belongs_to_org`, `cl_sanitize_snapshot_for_org`
+- [x] `applyRemoteSyncChanges` — yabancı org change filtreleme
+- [x] Auth logout → tam state sıfırlama (web + desktop)
+- [x] Vitest: `merge-tenant.test.ts`
+
+### Kabul kriterleri
+
+- [x] `mike@ross.com` ve `test@deneme.com` aynı tarayıcıda birbirinin müşterisini görmez
+- [x] Logout sonrası bellekte eski tenant verisi kalmaz
+- [x] Sync push'ta yabancı `organizationId` içeren change reddedilir
+- [x] Sync pull'da `remote.organizationId !== localOrg` reddedilir
+
+### Tahmini süre
+
+1–2 gün (uygulandı)
+
+---
+
 ## Sonraki Adım
 
-1. **Faz 14** — canlı ortamda çoklu hesap regression testi
+1. **Faz 19** — canlı ortamda çoklu hesap regression testi (manuel QA)
 2. **Faz 17** — kalan ekran metinlerinin i18n'e taşınması
 3. **Faz 9+** — termal CP857, çoklu yazıcı profili
 
