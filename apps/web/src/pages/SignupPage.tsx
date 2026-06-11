@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { PasswordRecoveryLinks } from "@/components/auth/PasswordRecoveryLinks";
 import { useAuth } from "@/context/AuthContext";
 
 export function SignupPage() {
@@ -111,26 +112,34 @@ export function SignupPage() {
                 label="E-posta"
                 required
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={form.email}
                 onChange={(v) => update("email", v)}
                 placeholder="ornek@firma.com"
                 className="sm:col-span-2"
               />
               <InputField
-                icon={MapPin}
-                label="Şehir"
-                value={form.city}
-                onChange={(v) => update("city", v)}
-                placeholder="İstanbul"
-              />
-              <InputField
                 icon={Lock}
                 label="Şifre"
                 required
                 type="password"
+                name="password"
+                autoComplete="new-password"
                 value={form.password}
                 onChange={(v) => update("password", v)}
                 placeholder="••••••••"
+                className="sm:col-span-2"
+              />
+              <InputField
+                icon={MapPin}
+                label="Şehir"
+                name="city"
+                autoComplete="address-level2"
+                value={form.city}
+                onChange={(v) => update("city", v)}
+                placeholder="İstanbul"
+                className="sm:col-span-2"
               />
             </div>
 
@@ -142,6 +151,10 @@ export function SignupPage() {
               {submitting && <Loader2 className="size-5 animate-spin" />}
               {submitting ? "Kaydediliyor..." : "14 Gün Ücretsiz Başla"}
             </button>
+
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <PasswordRecoveryLinks email={form.email} />
+            </div>
 
             <p className="mt-6 text-center text-sm text-muted">
               Zaten hesabınız var mı?{" "}
@@ -165,6 +178,8 @@ function InputField({
   onChange,
   placeholder,
   type = "text",
+  name,
+  autoComplete,
   required,
   className = "",
 }: {
@@ -174,6 +189,8 @@ function InputField({
   onChange: (v: string) => void;
   placeholder: string;
   type?: string;
+  name?: string;
+  autoComplete?: string;
   required?: boolean;
   className?: string;
 }) {
@@ -187,6 +204,8 @@ function InputField({
         <Icon className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted" />
         <input
           type={type}
+          name={name}
+          autoComplete={autoComplete}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}

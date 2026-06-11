@@ -16,6 +16,8 @@ import {
 import {
   clearLicenseCache,
   ensureLicense,
+  activateLicense,
+  saveLicenseCache,
   isLicenseUsable,
   type LicenseContext,
   type LicenseSnapshot,
@@ -24,8 +26,10 @@ import { getInstallationId } from "@/lib/installation";
 import { runSyncPull, initSyncListeners } from "@/lib/sync-service";
 import {
   initDatabase,
+  hydrateOrganizationProfileCache,
   saveOrganizationSettings,
   clearOrganizationSettings,
+  switchTenantContext,
   type OrganizationInput,
 } from "@/db/client";
 import type { OrganizationSettings } from "@/db/schema";
@@ -78,6 +82,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   changePassword: (input: ChangePasswordInput) => Promise<void>;
   refreshLicense: () => Promise<void>;
+  activateLicenseKey: (licenseKey: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -162,10 +167,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await syncLicense(session ?? loadSession());
   }, [session, syncLicense]);
 
+  const activateLicenseKey = useCallback(
+    async (licenseKey: string) => {
+      const activeSession = session ?? loadSession();
+      if (!activeSession?.user) {
+        throw new Error("Oturum bulunamadı.");
+      }
+      const snapshot = await activateLicense(
+        getInstallationId(),
+        licenseKey,
+        licenseContextFromSession(activeSession)
+      );
+      saveLicenseCache(snapshot, activeSession.user.email);
+      setLicense(snapshot);
+    },
+    [session]
+  );
+
   useEffect(() => {
     void (async () => {
       try {
         await initDatabase();
+        await hydrateOrganizationProfileCache();
       } catch (err) {
         setDbError(formatUnknownError(err, "Veritabanı başlatılamadı."));
         console.error("[CleanLedger] initDatabase failed:", err);
@@ -177,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const restored = saved ? await restoreSession(saved) : null;
 
         if (restored) {
+          await switchTenantContext(restored.user.email);
           const org = await syncOrganization(restored);
           if (!org.authToken?.trim()) {
             await clearAuthState();
@@ -186,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setOrganization(org);
           await syncLicense(restored);
           try {
-            const pulled = await runSyncPull();
+            const pulled = await runSyncPull(true);
             if (pulled) {
               window.dispatchEvent(new Event("cleanledger-sync"));
             }
@@ -248,6 +272,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       let org: OrganizationSettings;
       try {
+        await switchTenantContext(next.user.email);
         org = await syncOrganization(next);
       } catch (err) {
         persistSession(null);
@@ -263,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setOrganization(org);
 
       try {
-        const pulled = await runSyncPull();
+        const pulled = await runSyncPull(true);
         if (pulled) {
           window.dispatchEvent(new Event("cleanledger-sync"));
         }
@@ -317,6 +342,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         changePassword,
         refreshLicense,
+        activateLicenseKey,
         logout,
       }}
     >

@@ -17,13 +17,21 @@ import {
 } from "@/lib/auth-api";
 import {
   ensureLicense,
+  activateLicense,
   getInstallationId,
   clearLicenseCache,
+  saveLicenseCache,
   isLicenseUsable,
   type LicenseSnapshot,
 } from "@/lib/license-client";
 import { runSyncPull, runSyncPush, initSyncListeners } from "@/lib/sync-service";
 import { saveShopProfile } from "@/lib/shop-profile";
+import {
+  bindAuthSession,
+  clearTenantContext,
+  switchTenantContext,
+  hydrateOrganizationProfileCache,
+} from "@/db/client";
 
 interface AuthContextValue {
   user: AuthSession["user"] | null;
@@ -35,6 +43,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   changePassword: (input: ChangePasswordInput) => Promise<void>;
   refreshLicense: () => Promise<void>;
+  activateLicenseKey: (licenseKey: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -72,9 +81,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await syncLicense(session ?? getSession());
   }, [session, syncLicense]);
 
+  const activateLicenseKey = useCallback(
+    async (licenseKey: string) => {
+      const activeSession = session ?? getSession();
+      if (!activeSession?.user) {
+        throw new Error("Oturum bulunamadı.");
+      }
+      const snapshot = await activateLicense(
+        getInstallationId(),
+        licenseKey,
+        licenseContextFromSession(activeSession)
+      );
+      saveLicenseCache(snapshot, activeSession.user.email);
+      setLicense(snapshot);
+    },
+    [session]
+  );
+
   useEffect(() => {
     const saved = getSession();
+    if (saved?.user?.email) {
+      switchTenantContext(saved.user.email);
+    }
     setSession(saved);
+    void hydrateOrganizationProfileCache();
     void syncLicense(saved).finally(() => setLoading(false));
   }, [syncLicense]);
 
@@ -109,7 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (input: SignupInput) => {
       clearLicenseCache();
       const s = await apiSignup(input);
-      saveShopProfile({
+      await bindAuthSession(s.user, s.token);
+      await saveShopProfile({
         companyName: input.companyName.trim(),
         phone: input.phone.trim(),
         email: input.email.trim(),
@@ -117,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       await syncLicense(s);
       setSession(s);
-      await runSyncPull();
+      await runSyncPull(true);
       void runSyncPush();
     },
     [syncLicense]
@@ -127,9 +158,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       clearLicenseCache();
       const s = await apiLogin(email, password);
+      await bindAuthSession(s.user, s.token);
       await syncLicense(s);
       setSession(s);
-      await runSyncPull();
+      await runSyncPull(true);
       void runSyncPush();
     },
     [syncLicense]
@@ -154,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearSession();
     clearLicenseCache();
+    clearTenantContext();
     setSession(null);
     setLicense(null);
   }, []);
@@ -172,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         changePassword,
         refreshLicense,
+        activateLicenseKey,
         logout,
       }}
     >

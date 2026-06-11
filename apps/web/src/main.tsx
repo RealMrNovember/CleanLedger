@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
+import { I18nProvider } from "@/context/I18nContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import App from "./App";
 import "./index.css";
@@ -10,9 +11,11 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <HashRouter>
       <ThemeProvider>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
+        <I18nProvider>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </I18nProvider>
       </ThemeProvider>
     </HashRouter>
   </StrictMode>

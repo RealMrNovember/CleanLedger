@@ -9,7 +9,11 @@ import {
 } from "@/lib/shop-profile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LogoUploadField } from "@/components/settings/LogoUploadField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SyncStatusPanel } from "@/components/settings/SyncStatusPanel";
+import { ThermalPrintSettingsPanel } from "@/components/settings/ThermalPrintSettingsPanel";
+import { LanguageSettingsPanel } from "@/components/settings/LanguageSettingsPanel";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
@@ -29,19 +33,21 @@ export function GeneralSettingsPanel() {
     setForm(getShopProfile());
   }, [user?.companyName, user?.email, user?.phone]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setError("");
     if (!form.companyName.trim()) {
       setError("Dükkan adı zorunludur.");
       return;
     }
-    saveShopProfile(form);
+    await saveShopProfile(form);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
   return (
-    <Card className="mx-auto max-w-xl bg-white dark:bg-slate-900">
+    <div className="mx-auto flex max-w-xl flex-col gap-6">
+    <SyncStatusPanel />
+    <Card className="bg-white dark:bg-slate-900">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-gray-900 dark:text-gray-100">
           <Store className="size-5 text-mint" />
@@ -77,6 +83,17 @@ export function GeneralSettingsPanel() {
         </div>
 
         <div className="border-t border-border/60 pt-4">
+          <LogoUploadField
+            value={form.logoDataUrl}
+            onChange={(logoDataUrl) =>
+              setForm((f) => ({ ...f, logoDataUrl }))
+            }
+            label="İşletme Logosu"
+            hint="Fiş ve müşteri belgelerinde görünür. PNG, JPEG veya WebP."
+          />
+        </div>
+
+        <div>
           <label className="mb-1 block text-sm font-medium">Dükkan Adı</label>
           <Input
             value={form.companyName}
@@ -104,6 +121,16 @@ export function GeneralSettingsPanel() {
             placeholder="info@dukkan.com"
           />
         </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Adres</label>
+          <Input
+            value={form.address ?? ""}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, address: e.target.value }))
+            }
+            placeholder="İşletme adresi (fişte görünür)"
+          />
+        </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         {saved && (
           <p className="text-sm font-medium text-mint">Kaydedildi — fişler güncellendi.</p>
@@ -111,5 +138,8 @@ export function GeneralSettingsPanel() {
         <Button onClick={handleSave}>Kaydet</Button>
       </CardContent>
     </Card>
+    <LanguageSettingsPanel />
+    <ThermalPrintSettingsPanel />
+    </div>
   );
 }

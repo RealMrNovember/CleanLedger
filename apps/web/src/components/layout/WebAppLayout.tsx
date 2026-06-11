@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import {
   Settings,
@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   BarChart3,
+  Search,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { SidebarNav } from "@/components/layout/SidebarNav";
@@ -19,33 +20,47 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { LicenseBadge } from "@/components/license/LicenseBadge";
 import { useAuth } from "@/context/AuthContext";
+import { useI18n } from "@/context/I18nContext";
 import { Button } from "@/components/ui/button";
+import { GlobalSearchDialog } from "@/components/search/GlobalSearchDialog";
 
-const navItems = [
-  { to: "/dashboard/pos", icon: ShoppingCart, label: "Sipariş (POS)" },
-  { to: "/dashboard/orders", icon: ClipboardList, label: "Sipariş Takibi" },
-  { to: "/dashboard/customers", icon: Users, label: "Müşteriler" },
-  { to: "/dashboard/reports", icon: BarChart3, label: "Raporlar" },
-  { to: "/dashboard/settings", icon: Settings, label: "Ayarlar" },
-  { to: "/dashboard/account", icon: UserCircle, label: "Hesabım" },
-];
+const navKeys = [
+  { to: "/dashboard/pos", icon: ShoppingCart, key: "nav.pos" },
+  { to: "/dashboard/orders", icon: ClipboardList, key: "nav.orders" },
+  { to: "/dashboard/customers", icon: Users, key: "nav.customers" },
+  { to: "/dashboard/reports", icon: BarChart3, key: "nav.reports" },
+  { to: "/dashboard/settings", icon: Settings, key: "nav.settings" },
+  { to: "/dashboard/account", icon: UserCircle, key: "nav.account" },
+] as const;
 
-function formatWelcome(ownerName: string, companyName: string): string {
+function formatWelcomeTitle(
+  ownerName: string,
+  companyName: string,
+  t: (key: string, params?: Record<string, string>) => string
+): string {
   const name = ownerName.trim();
   const titled =
     name.endsWith(" Bey") || name.endsWith(" Hanım") ? name : `${name} Bey`;
-  return `Hoş Geldiniz, ${titled} — ${companyName}`;
+  return t("common.welcome", { name: titled, company: companyName });
 }
 
 function SidebarContent({
   collapsed,
   onNavigate,
   onLogout,
+  t,
 }: {
   collapsed: boolean;
   onNavigate?: () => void;
   onLogout: () => void;
+  t: (key: string, params?: Record<string, string>) => string;
 }) {
+  const navItems = navKeys.map((item) => ({
+    to: item.to,
+    icon: item.icon,
+    label: t(item.key),
+  }));
+
   return (
     <>
       <div
@@ -67,10 +82,10 @@ function SidebarContent({
             collapsed ? "w-full justify-center px-2" : "w-full justify-start gap-2"
           )}
           onClick={onLogout}
-          title="Çıkış Yap"
+          title={t("common.logout")}
         >
           <LogOut className="size-4" />
-          {!collapsed && "Çıkış Yap"}
+          {!collapsed && t("common.logout")}
         </Button>
       </div>
     </>
@@ -79,9 +94,22 @@ function SidebarContent({
 
 export function WebAppLayout() {
   const { user, logout } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -90,6 +118,7 @@ export function WebAppLayout() {
 
   return (
     <div className="flex h-[100dvh] flex-col bg-white text-gray-900 dark:bg-slate-900 dark:text-gray-100 md:flex-row">
+      <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
       {/* Desktop sidebar */}
       <aside
         className={cn(
@@ -97,7 +126,7 @@ export function WebAppLayout() {
           collapsed ? "w-[4.5rem]" : "w-56"
         )}
       >
-        <SidebarContent collapsed={collapsed} onLogout={handleLogout} />
+        <SidebarContent collapsed={collapsed} onLogout={handleLogout} t={t} />
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
@@ -136,6 +165,7 @@ export function WebAppLayout() {
               </button>
             </div>
             <SidebarContent
+              t={t}
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
               onLogout={handleLogout}
@@ -156,9 +186,30 @@ export function WebAppLayout() {
           </button>
           {user?.companyName && user?.ownerName && (
             <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
-              {formatWelcome(user.ownerName, user.companyName)}
+              {formatWelcomeTitle(user.ownerName, user.companyName, t)}
             </p>
           )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="hidden shrink-0 gap-2 sm:inline-flex"
+            onClick={() => setSearchOpen(true)}
+          >
+            <Search className="size-4" />
+            <span className="text-muted-foreground">{t("common.search")}</span>
+            <kbd className="hidden rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground md:inline">
+              Ctrl+K
+            </kbd>
+          </Button>
+          <button
+            type="button"
+            className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-border/60 sm:hidden"
+            onClick={() => setSearchOpen(true)}
+            aria-label={t("common.search")}
+          >
+            <Search className="size-5" />
+          </button>
           <ThemeToggle />
         </div>
 

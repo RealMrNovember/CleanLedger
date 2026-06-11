@@ -1,0 +1,49 @@
+{
+  "name": "@cleanledger/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts",
+    "./dates": "./src/dates.ts",
+    "./utils": "./src/utils.ts",
+    "./whatsapp": "./src/whatsapp.ts",
+    "./product-art": "./src/product-art.tsx",
+    "./product-icons": "./src/product-icons.tsx",
+    "./license": "./src/license/index.ts",
+    "./ids": "./src/ids/global-id.ts",
+    "./print": "./src/print/index.ts",
+    "./sync": "./src/sync/index.ts",
+    "./templates": "./src/templates/index.ts",
+    "./numbering": "./src/numbering/index.ts",
+    "./organization": "./src/organization/index.ts",
+    "./tenant": "./src/tenant/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./reports": "./src/reports/index.ts",
+    "./schema/local-db": "./src/schema/local-db.ts",
+    "./schema/mappers": "./src/schema/mappers.ts",
+    "./migrations": "./src/migrations/index.ts",
+    "./schema/entity-scope": "./src/schema/entity-scope.ts",
+    "./schema/zod": "./src/schema/zod.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.44.2",
+    "tailwind-merge": "^3.3.0",
+    "zod": "^3.25.67"
+  },
+  "peerDependencies": {
+    "lucide-react": "^0.513.0",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Mail, Lock, Loader2 } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { PasswordRecoveryLinks } from "@/components/auth/PasswordRecoveryLinks";
 import { useAuth } from "@/context/AuthContext";
 
 export function LoginPage() {
@@ -58,6 +59,8 @@ export function LoginPage() {
               <Field label="E-posta" icon={Mail}>
                 <input
                   type="email"
+                  name="email"
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="ornek@firma.com"
@@ -67,12 +70,22 @@ export function LoginPage() {
               <Field label="Şifre" icon={Lock}>
                 <input
                   type="password"
+                  name="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className="field-input"
                 />
               </Field>
+              <div className="text-right">
+                <Link
+                  to="/forgot-password"
+                  className="text-sm font-medium text-trust hover:underline"
+                >
+                  Parolamı unuttum
+                </Link>
+              </div>
               <button
                 type="submit"
                 disabled={submitting}
@@ -81,6 +94,10 @@ export function LoginPage() {
                 {submitting && <Loader2 className="size-5 animate-spin" />}
                 {submitting ? "Giriş yapılıyor..." : "Giriş Yap"}
               </button>
+            </div>
+
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <PasswordRecoveryLinks email={email} />
             </div>
 
             <p className="mt-6 text-center text-sm text-muted">

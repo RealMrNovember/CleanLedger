@@ -10,14 +10,21 @@ import type {
   ServicePrice,
   PaymentStatus,
   PaymentMethod,
+  PaymentMode,
   OrderStatus,
   OrderPriority,
+  ItemStatus,
   CouponType,
   TagColor,
   OrderWithMeta,
   OrderDashboardStats,
   CustomerListMeta,
   OrganizationSettings,
+  CreditLedgerEntry,
+  CreditReset,
+  CreditLedgerType,
+  WhatsappTemplate,
+  AuditLogEntry,
 } from "./schema";
 import {
   SERVICE_PRICE_MODIFIERS,
@@ -28,134 +35,320 @@ import {
 import { SEED_PRODUCTS } from "./seed";
 import { toDateKey, addDaysToDate } from "@/lib/dates";
 import { formatCustomerName } from "@/lib/utils";
+import {
+  resolveCustomerNameForOrder,
+  summarizeOrderItemColors,
+  cloneDefaultProductColorPalette,
+  countItemReadiness,
+  deriveOrderStatusFromItems,
+  orderMatchesGlobalSearch,
+  customerMatchesGlobalSearch,
+  rankGlobalSearchHits,
+  type GlobalSearchHit,
+  type ProductColorPreset,
+  computeCreateOrderFinancials,
+} from "@cleanledger/shared";
+import type { LocalDb, DatabaseSnapshot } from "@cleanledger/shared/schema/local-db";
+import { LOCAL_DB_SCHEMA_VERSION } from "@cleanledger/shared/schema/local-db";
+import {
+  WEB_STORAGE_KEY_V2,
+  WEB_STORAGE_KEY_V3,
+  LEGACY_WEB_STORAGE_KEY,
+  ORG_STORAGE_KEY,
+  SHOP_PROFILE_STORAGE_KEY,
+  SQLITE_V3_MIGRATIONS,
+  SQLITE_V4_MIGRATIONS,
+  emptyLocalDb,
+  safeMigrateRecordToV4,
+  mergeOrganizationProfile,
+  createGlobalId,
+} from "@cleanledger/shared/migrations";
+import {
+  withLogoHash,
+  upsertSyncQueueEntry,
+  getPendingSyncQueue,
+  markSyncQueueSynced,
+  applySyncChanges,
+  customerSyncPayload,
+  orderSyncPayload,
+  organizationSyncPayload,
+  productSyncPayload,
+  couponSyncPayload,
+  customerTagSyncPayload,
+  servicePriceSyncPayload,
+  whatsappTemplateSyncPayload,
+  creditLedgerSyncPayload,
+  auditLogSyncPayload,
+} from "@cleanledger/shared/sync";
+import type {
+  SyncQueueEntry,
+  SyncEntityType,
+  SyncOperation,
+} from "@cleanledger/shared/sync";
+import {
+  readLegacyOrgSettings,
+  readLegacyShopProfile,
+} from "@/lib/legacy-storage";
+import {
+  num,
+  mapProduct,
+  mapCustomer,
+  mapCustomerTag,
+  mapCoupon,
+  mapServicePrice,
+  mapOrder,
+  mapOrderItem,
+  mapOrderPayment,
+  mapOrganizationSettings,
+  mapSyncQueueRow,
+  mapCreditLedger,
+  mapCreditReset,
+  mapAuditLog,
+  mapWhatsappTemplate,
+} from "@cleanledger/shared/schema/mappers";
+import { computeLinePriceMetrics } from "@cleanledger/shared/reports";
+import { DEFAULT_WHATSAPP_TEMPLATES } from "@cleanledger/shared/templates";
+import { formatItemNumber, formatOrderNumber } from "@cleanledger/shared/numbering";
+import { normalizeOrganizationId } from "@cleanledger/shared/organization";
+import {
+  ACTIVE_TENANT_SESSION_KEY,
+  entityBelongsToTenant,
+  isolateLocalDbForTenant,
+  resolveTenantWebStorageKey,
+} from "@cleanledger/shared/tenant";
+import type { AuthUser } from "@/lib/auth-api";
+import {
+  clearSyncUpdatedAt,
+  setSyncMetaOrganization,
+} from "@/lib/sync-meta";
+import {
+  ENTITY_SCOPE_DEFAULTS,
+  BRANCH_SCOPE_DEFAULT,
+} from "@cleanledger/shared/schema/entity-scope";
 
-const STORAGE_KEY = "cleanledger_web_db_v2";
-const LEGACY_STORAGE_KEY = "cleanledger_web_db_v1";
-const ORG_STORAGE_KEY = "cleanledger_web_org_v1";
+export type { LocalDb, DatabaseSnapshot };
 
-export interface LocalDb {
-  products: Product[];
-  customers: Customer[];
-  customerTags: CustomerTag[];
-  coupons: Coupon[];
-  servicePrices: ServicePrice[];
-  orders: Order[];
-  orderItems: OrderItem[];
-  orderPayments: OrderPayment[];
-  nextProductId: number;
-  nextCustomerId: number;
-  nextCustomerTagId: number;
-  nextCouponId: number;
-  nextServicePriceId: number;
-  nextOrderId: number;
-  nextOrderItemId: number;
-  nextOrderPaymentId: number;
-  nextOrderNumber: number;
+let activeWebStorageKey = WEB_STORAGE_KEY_V3;
+let activeTenantId: string | null = null;
+
+let organizationProfileCache: OrganizationSettings | null = null;
+
+function readPersistedTenantId(): string | null {
+  try {
+    return sessionStorage.getItem(ACTIVE_TENANT_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistActiveTenantId(tenantId: string | null): void {
+  activeTenantId = tenantId;
+  setSyncMetaOrganization(tenantId);
+  try {
+    if (tenantId) {
+      sessionStorage.setItem(ACTIVE_TENANT_SESSION_KEY, tenantId);
+    } else {
+      sessionStorage.removeItem(ACTIVE_TENANT_SESSION_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function getActiveTenantId(): string | null {
+  return activeTenantId?.trim() || readPersistedTenantId()?.trim() || null;
+}
+
+/** Oturum e-postasına göre org-scoped localStorage anahtarına geçer. */
+export function switchTenantContext(organizationEmail: string): void {
+  const tenantId = normalizeOrganizationId(organizationEmail);
+  persistActiveTenantId(tenantId);
+  activeWebStorageKey = resolveTenantWebStorageKey(WEB_STORAGE_KEY_V3, tenantId, {
+    read: (key) => localStorage.getItem(key),
+    write: (key, value) => localStorage.setItem(key, value),
+  });
+  organizationProfileCache = null;
+  clearSyncUpdatedAt(tenantId);
+}
+
+export function clearTenantContext(): void {
+  persistActiveTenantId(null);
+  activeWebStorageKey = WEB_STORAGE_KEY_V3;
+  organizationProfileCache = null;
+  clearSyncUpdatedAt();
+}
+
+export async function bindAuthSession(
+  user: AuthUser,
+  token: string
+): Promise<void> {
+  switchTenantContext(user.email);
+  await saveOrganizationSettings({
+    companyName: user.companyName,
+    adminName: user.ownerName,
+    email: user.email,
+    phone: user.phone,
+    address: user.city,
+    authToken: token,
+    trialEndsAt: user.trialEndsAt,
+    organizationId: normalizeOrganizationId(user.email),
+  });
+  await hydrateOrganizationProfileCache();
+}
+
+function tenantGuard<T extends { organizationId?: string | null }>(
+  entity: T | null | undefined
+): T | null {
+  if (!entity) return null;
+  const tenantId = getActiveTenantId();
+  if (!tenantId) return entity;
+  if (!entityBelongsToTenant(entity, tenantId)) return null;
+  return entity;
+}
+
+function setOrganizationProfileCache(
+  org: OrganizationSettings | null
+): void {
+  organizationProfileCache = org;
+}
+
+/** Tauri'de senkron okuma için bellek önbelleği; web'de localStorage snapshot. */
+export function getOrganizationSettingsSync(): OrganizationSettings | null {
+  if (isTauri()) return organizationProfileCache;
+  return loadLocalDb().organizationProfile;
+}
+
+export async function hydrateOrganizationProfileCache(): Promise<void> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM organization_settings ORDER BY id DESC LIMIT 1"
+    );
+    setOrganizationProfileCache(
+      rows[0] ? mapOrganizationSettings(rows[0]) : null
+    );
+    return;
+  }
+  setOrganizationProfileCache(loadLocalDb().organizationProfile);
 }
 
 function seedDefaultTags(startId = 1): CustomerTag[] {
   return DEFAULT_CUSTOMER_TAGS.map((t, i) => ({
     id: startId + i,
+    globalId: null,
+    organizationId: null,
     slug: t.slug,
     label: t.label,
     color: t.color,
   }));
 }
 
-function emptyDb(): LocalDb {
-  const tags = seedDefaultTags();
-  return {
-    products: [],
-    customers: [],
-    customerTags: tags,
-    coupons: [],
-    servicePrices: [],
-    orders: [],
-    orderItems: [],
-    orderPayments: [],
-    nextProductId: 1,
-    nextCustomerId: 1,
-    nextCustomerTagId: tags.length + 1,
-    nextCouponId: 1,
-    nextServicePriceId: 1,
-    nextOrderId: 1,
-    nextOrderItemId: 1,
-    nextOrderPaymentId: 1,
-    nextOrderNumber: 1,
-  };
-}
+function finalizeLocalDb(parsed: Record<string, unknown>): LocalDb {
+  const { db: migrated, warnings } = safeMigrateRecordToV4(parsed);
+  let db = migrated;
+  if (warnings.length) {
+    console.warn("[CleanLedger] Migration uyarıları:", warnings);
+  }
 
-function migrateLegacyDb(parsed: Record<string, unknown>): LocalDb {
-  const base = emptyDb();
-  const merged: LocalDb = {
-    ...base,
-    ...(parsed as Partial<LocalDb>),
-    customerTags:
-      Array.isArray(parsed.customerTags) && parsed.customerTags.length
-        ? (parsed.customerTags as CustomerTag[])
-        : base.customerTags,
-    coupons: Array.isArray(parsed.coupons) ? (parsed.coupons as Coupon[]) : [],
-    customers: (Array.isArray(parsed.customers) ? parsed.customers : []).map(
-      (c) => mapCustomer(c as Record<string, unknown>)
-    ),
-    orders: (Array.isArray(parsed.orders) ? parsed.orders : []).map((o) =>
-      mapOrder(o as Record<string, unknown>)
-    ),
-    orderPayments: Array.isArray(parsed.orderPayments)
-      ? (parsed.orderPayments as OrderPayment[])
-      : [],
-    nextOrderPaymentId: num(parsed.nextOrderPaymentId, 1),
-    nextCustomerTagId: num(parsed.nextCustomerTagId, base.nextCustomerTagId),
-    nextCouponId: num(parsed.nextCouponId, 1),
-  };
-  return merged;
+  if (!db.organizationProfile) {
+    db.organizationProfile = mergeOrganizationProfile(
+      readLegacyOrgSettings(),
+      readLegacyShopProfile()
+    );
+  }
+
+  if (!Array.isArray(db.orderPayments)) db.orderPayments = [];
+  if (!db.nextOrderPaymentId) db.nextOrderPaymentId = 1;
+  backfillOrderPayments(db);
+
+  if (Array.isArray(db.products)) {
+    let productsChanged = false;
+    db.products = db.products.map((product, index) => {
+      if (product.sortOrder == null) {
+        productsChanged = true;
+        return { ...product, sortOrder: index };
+      }
+      return product;
+    });
+    if (productsChanged) saveLocalDb(db);
+  }
+
+  if (!Array.isArray(db.productColorPalette) || !db.productColorPalette.length) {
+    db.productColorPalette = cloneDefaultProductColorPalette();
+  }
+
+  return db;
 }
 
 function loadLocalDb(): LocalDb {
   try {
-    let raw = localStorage.getItem(STORAGE_KEY);
+    const storageKey = activeWebStorageKey;
+    const tenantId = getActiveTenantId();
+    let raw = localStorage.getItem(storageKey);
+    if (!raw && storageKey !== WEB_STORAGE_KEY_V3) {
+      const db = emptyLocalDb();
+      return tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
+    }
     if (!raw) {
-      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (legacy) {
-        const migrated = migrateLegacyDb(JSON.parse(legacy) as Record<string, unknown>);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-        return migrated;
+      const v2 = localStorage.getItem(WEB_STORAGE_KEY_V2);
+      if (v2) {
+        const migrated = finalizeLocalDb(JSON.parse(v2) as Record<string, unknown>);
+        localStorage.setItem(storageKey, JSON.stringify(migrated));
+        localStorage.removeItem(WEB_STORAGE_KEY_V2);
+        localStorage.removeItem(ORG_STORAGE_KEY);
+        localStorage.removeItem(SHOP_PROFILE_STORAGE_KEY);
+        return tenantId
+          ? isolateLocalDbForTenant(migrated, tenantId)
+          : migrated;
       }
-      return emptyDb();
+      const legacy = localStorage.getItem(LEGACY_WEB_STORAGE_KEY);
+      if (legacy) {
+        const migrated = finalizeLocalDb(JSON.parse(legacy) as Record<string, unknown>);
+        localStorage.setItem(storageKey, JSON.stringify(migrated));
+        localStorage.removeItem(LEGACY_WEB_STORAGE_KEY);
+        return tenantId
+          ? isolateLocalDbForTenant(migrated, tenantId)
+          : migrated;
+      }
+      const db = emptyLocalDb();
+      db.organizationProfile = mergeOrganizationProfile(
+        readLegacyOrgSettings(),
+        readLegacyShopProfile()
+      );
+      return tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!Array.isArray(parsed.customerTags)) {
-      return migrateLegacyDb(parsed);
+    const schemaVersion = num(parsed.schemaVersion, 2);
+    if (schemaVersion < LOCAL_DB_SCHEMA_VERSION) {
+      const migrated = finalizeLocalDb(parsed);
+      localStorage.setItem(storageKey, JSON.stringify(migrated));
+      localStorage.removeItem(ORG_STORAGE_KEY);
+      localStorage.removeItem(SHOP_PROFILE_STORAGE_KEY);
+      return tenantId
+        ? isolateLocalDbForTenant(migrated, tenantId)
+        : migrated;
     }
-    const db = parsed as unknown as LocalDb;
-    if (!Array.isArray(db.orderPayments)) db.orderPayments = [];
-    if (!db.nextOrderPaymentId) db.nextOrderPaymentId = 1;
-    backfillOrderPayments(db);
-    if (Array.isArray(db.products)) {
-      let productsChanged = false;
-      db.products = db.products.map((product, index) => {
-        if (product.sortOrder == null) {
-          productsChanged = true;
-          return { ...product, sortOrder: index };
-        }
-        return product;
-      });
-      if (productsChanged) saveLocalDb(db);
-    }
-    return db;
+    const db = finalizeLocalDb(parsed);
+    return tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
   } catch {
-    return emptyDb();
+    const db = emptyLocalDb();
+    const tenantId = getActiveTenantId();
+    return tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
   }
 }
 
-function saveLocalDb(db: LocalDb): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-  triggerSyncPush();
+function saveLocalDb(db: LocalDb, options?: { silent?: boolean }): void {
+  const tenantId = getActiveTenantId();
+  const payload = tenantId ? isolateLocalDbForTenant(db, tenantId) : db;
+  localStorage.setItem(activeWebStorageKey, JSON.stringify(payload));
+  if (!options?.silent) triggerSyncPush();
 }
 
-function triggerSyncPush(): void {
-  void import("@/lib/sync-service").then((m) => m.scheduleSyncPush());
+function triggerSyncPush(immediate = false): void {
+  void import("@/lib/sync-service").then((m) => {
+    if (immediate) void m.runSyncPush(true);
+    else m.scheduleSyncPush();
+  });
 }
 
 function isTauri(): boolean {
@@ -189,176 +382,17 @@ async function getSqlDb(): Promise<SqlDb> {
   return sqlDb;
 }
 
-function num(value: unknown, fallback = 0): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-export function mapProduct(row: Record<string, unknown>): Product {
-  const id = num(row.id);
-  return {
-    id,
-    name: String(row.name ?? ""),
-    iconName: String(row.icon_name ?? row.iconName ?? "default"),
-    basePrice: num(row.base_price ?? row.basePrice, 0),
-    sortOrder: num(row.sort_order ?? row.sortOrder, id),
-  };
-}
-
-export function mapCustomerTag(row: Record<string, unknown>): CustomerTag {
-  return {
-    id: num(row.id),
-    slug: String(row.slug ?? ""),
-    label: String(row.label ?? ""),
-    color: String(row.color ?? "slate") as TagColor,
-  };
-}
-
-export function mapCoupon(row: Record<string, unknown>): Coupon {
-  return {
-    id: num(row.id),
-    code: String(row.code ?? "").toUpperCase(),
-    type: String(row.type ?? "percent") as CouponType,
-    value: num(row.value),
-    active: num(row.active, 1),
-    createdAt: String(row.created_at ?? row.createdAt ?? ""),
-  };
-}
-
-export function mapCustomer(row: Record<string, unknown>): Customer {
-  return {
-    id: num(row.id),
-    name: String(row.name ?? ""),
-    lastName: String(row.last_name ?? row.lastName ?? ""),
-    phone: String(row.phone ?? ""),
-    notes: String(row.notes ?? ""),
-    address: String(row.address ?? ""),
-    tagId: num(row.tag_id ?? row.tagId, 1),
-    creditBalance: num(row.credit_balance ?? row.creditBalance, 0),
-    createdAt: String(row.created_at ?? row.createdAt ?? ""),
-    updatedAt: String(row.updated_at ?? row.updatedAt ?? ""),
-  };
-}
-
-export function mapServicePrice(row: Record<string, unknown>): ServicePrice {
-  return {
-    id: num(row.id),
-    productId: num(row.product_id ?? row.productId),
-    serviceType: String(row.service_type ?? row.serviceType) as ServiceType,
-    price: num(row.price),
-  };
-}
-
-export function mapOrder(row: Record<string, unknown>): Order {
-  const legacyStatus = String(row.status ?? "");
-  let orderStatus = String(
-    row.order_status ?? row.orderStatus ?? legacyStatus ?? "preparing"
-  ) as OrderStatus;
-  if (orderStatus === ("received" as string)) {
-    orderStatus = "preparing";
-  }
-  if (!["preparing", "ready", "delivered"].includes(orderStatus)) {
-    orderStatus =
-      legacyStatus === "delivered"
-        ? "delivered"
-        : legacyStatus === "ready"
-          ? "ready"
-          : "preparing";
-  }
-
-  const deliveryRaw = row.delivery_date ?? row.deliveryDate;
-  const deliveryDate = deliveryRaw
-    ? String(deliveryRaw).slice(0, 10)
-    : toDateKey(addDaysToDate(new Date(), 3));
-
-  let priority = String(row.priority ?? "normal") as OrderPriority;
-  if (priority !== "normal" && priority !== "urgent") {
-    priority = "normal";
-  }
-
-  const subtotalAmount = num(
-    row.subtotal_amount ?? row.subtotalAmount ?? row.total_amount ?? row.totalAmount,
-    0
-  );
-  const discountAmount = num(row.discount_amount ?? row.discountAmount, 0);
-  const totalAmount = num(
-    row.total_amount ?? row.totalAmount,
-    Math.max(0, subtotalAmount - discountAmount)
-  );
-  const amountPaid = num(row.amount_paid ?? row.amountPaid, 0);
-  const balanceDue = num(
-    row.balance_due ?? row.balanceDue,
-    Math.max(0, totalAmount - amountPaid)
-  );
-  let paymentMethod = String(
-    row.payment_method ?? row.paymentMethod ?? "cash"
-  ) as PaymentMethod;
-  if (paymentMethod !== "cash" && paymentMethod !== "card") {
-    paymentMethod = "cash";
-  }
-
-  let paymentStatus = String(
-    row.payment_status ?? row.paymentStatus ?? "unpaid"
-  ) as PaymentStatus;
-  if (!["paid", "partial", "unpaid"].includes(paymentStatus)) {
-    paymentStatus = derivePaymentStatus(amountPaid, totalAmount);
-  }
-  if (paymentStatus === "unpaid" && amountPaid > 0 && balanceDue > 0) {
-    paymentStatus = "partial";
-  }
-
-  return {
-    id: num(row.id),
-    orderNumber: String(row.order_number ?? row.orderNumber ?? ""),
-    customerId:
-      row.customer_id != null || row.customerId != null
-        ? num(row.customer_id ?? row.customerId)
-        : null,
-    customerPhone: String(row.customer_phone ?? row.customerPhone ?? ""),
-    subtotalAmount,
-    discountAmount,
-    totalAmount,
-    amountPaid,
-    balanceDue,
-    paymentMethod,
-    couponCode:
-      row.coupon_code != null || row.couponCode != null
-        ? String(row.coupon_code ?? row.couponCode)
-        : null,
-    paymentStatus,
-    orderStatus,
-    deliveryDate,
-    priority,
-    createdAt: String(row.created_at ?? row.createdAt ?? ""),
-  };
-}
-
-export function mapOrderItem(row: Record<string, unknown>): OrderItem {
-  return {
-    id: num(row.id),
-    orderId: num(row.order_id ?? row.orderId),
-    productId: num(row.product_id ?? row.productId),
-    serviceType: String(row.service_type ?? row.serviceType) as ServiceType,
-    subtotal: num(row.subtotal),
-  };
-}
-
-export function mapOrderPayment(row: Record<string, unknown>): OrderPayment {
-  let paymentMethod = String(
-    row.payment_method ?? row.paymentMethod ?? "cash"
-  ) as PaymentMethod;
-  if (paymentMethod !== "cash" && paymentMethod !== "card") {
-    paymentMethod = "cash";
-  }
-  return {
-    id: num(row.id),
-    orderId: num(row.order_id ?? row.orderId),
-    amount: num(row.amount),
-    paymentMethod,
-    createdAt: String(row.created_at ?? row.createdAt ?? ""),
-    refunded: num(row.refunded, 0),
-  };
-}
+export {
+  mapProduct,
+  mapCustomerTag,
+  mapCoupon,
+  mapCustomer,
+  mapServicePrice,
+  mapOrder,
+  mapOrderItem,
+  mapOrderPayment,
+  mapOrganizationSettings,
+} from "@cleanledger/shared/schema/mappers";
 
 function backfillOrderPayments(db: LocalDb): void {
   for (const order of db.orders) {
@@ -368,6 +402,7 @@ function backfillOrderPayments(db: LocalDb): void {
     const recorded = active.reduce((s, p) => s + p.amount, 0);
     if (order.amountPaid > recorded + 0.001) {
       db.orderPayments.push({
+        ...ENTITY_SCOPE_DEFAULTS,
         id: db.nextOrderPaymentId++,
         orderId: order.id,
         amount: order.amountPaid - recorded,
@@ -379,10 +414,164 @@ function backfillOrderPayments(db: LocalDb): void {
   }
 }
 
+async function writeCreditLedgerEntry(params: {
+  customerId: number;
+  orderId?: number | null;
+  resetId?: number | null;
+  entryType: CreditLedgerType;
+  amount: number;
+  balanceAfter: number;
+  note?: string;
+}): Promise<CreditLedgerEntry> {
+  const organizationId = getOrganizationId() ?? "";
+  const globalId = createGlobalId();
+  const createdAt = new Date().toISOString();
+  const note = params.note ?? "";
+
+  let entry: CreditLedgerEntry;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      `INSERT INTO credit_ledger (
+         global_id, organization_id, customer_id, order_id, reset_id,
+         entry_type, amount, balance_after, note, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        globalId,
+        organizationId,
+        params.customerId,
+        params.orderId ?? null,
+        params.resetId ?? null,
+        params.entryType,
+        params.amount,
+        params.balanceAfter,
+        note,
+        createdAt,
+      ]
+    );
+    entry = {
+      id: result.lastInsertId,
+      globalId,
+      organizationId,
+      customerId: params.customerId,
+      orderId: params.orderId ?? null,
+      resetId: params.resetId ?? null,
+      entryType: params.entryType,
+      amount: params.amount,
+      balanceAfter: params.balanceAfter,
+      note,
+      createdAt,
+    };
+  } else {
+    const local = loadLocalDb();
+    entry = {
+      id: local.nextCreditLedgerId++,
+      globalId,
+      organizationId,
+      customerId: params.customerId,
+      orderId: params.orderId ?? null,
+      resetId: params.resetId ?? null,
+      entryType: params.entryType,
+      amount: params.amount,
+      balanceAfter: params.balanceAfter,
+      note,
+      createdAt,
+    };
+    local.creditLedger.push(entry);
+    saveLocalDb(local, { silent: true });
+  }
+
+  await enqueueSyncChange(
+    "credit_ledger",
+    globalId,
+    "create",
+    creditLedgerSyncPayload(entry),
+    false
+  );
+  return entry;
+}
+
+async function appendAuditLogEntry(params: {
+  entityType: string;
+  entityGlobalId?: string | null;
+  action: string;
+  payload?: Record<string, unknown>;
+  actorEmail?: string | null;
+}): Promise<AuditLogEntry> {
+  const organizationId = getOrganizationId() ?? "";
+  const globalId = createGlobalId();
+  const createdAt = new Date().toISOString();
+  const payloadJson = JSON.stringify(params.payload ?? {});
+
+  let entry: AuditLogEntry;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      `INSERT INTO audit_log (
+         global_id, organization_id, entity_type, entity_global_id,
+         action, payload, actor_email, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        globalId,
+        organizationId,
+        params.entityType,
+        params.entityGlobalId ?? null,
+        params.action,
+        payloadJson,
+        params.actorEmail ?? null,
+        createdAt,
+      ]
+    );
+    entry = {
+      id: result.lastInsertId,
+      globalId,
+      organizationId,
+      entityType: params.entityType,
+      entityGlobalId: params.entityGlobalId ?? null,
+      action: params.action,
+      payload: payloadJson,
+      actorEmail: params.actorEmail ?? null,
+      createdAt,
+    };
+  } else {
+    const local = loadLocalDb();
+    entry = {
+      id: local.nextAuditLogId++,
+      globalId,
+      organizationId,
+      entityType: params.entityType,
+      entityGlobalId: params.entityGlobalId ?? null,
+      action: params.action,
+      payload: payloadJson,
+      actorEmail: params.actorEmail ?? null,
+      createdAt,
+    };
+    local.auditLog.push(entry);
+    saveLocalDb(local, { silent: true });
+  }
+
+  await enqueueSyncChange(
+    "audit_log",
+    globalId,
+    "create",
+    auditLogSyncPayload(entry),
+    false
+  );
+  return entry;
+}
+
 async function adjustCustomerCredit(
   customerId: number | null,
   customerPhone: string,
-  delta: number
+  delta: number,
+  meta?: {
+    orderId?: number | null;
+    resetId?: number | null;
+    entryType: CreditLedgerType;
+    note?: string;
+  }
 ): Promise<void> {
   if (Math.abs(delta) < 0.001) return;
   let cid = customerId;
@@ -392,25 +581,37 @@ async function adjustCustomerCredit(
   }
   if (!cid) return;
 
+  let next = 0;
   if (isTauri()) {
     const db = await getSqlDb();
     const rows = await db.select<{ credit_balance: number }>(
       "SELECT credit_balance FROM customers WHERE id = ?",
       [cid]
     );
-    const next = Math.max(0, (rows[0]?.credit_balance ?? 0) + delta);
+    next = Math.max(0, (rows[0]?.credit_balance ?? 0) + delta);
     await db.execute("UPDATE customers SET credit_balance = ? WHERE id = ?", [
       next,
       cid,
     ]);
-    return;
+  } else {
+    const local = loadLocalDb();
+    const c = local.customers.find((x) => x.id === cid);
+    if (!c) return;
+    next = Math.max(0, c.creditBalance + delta);
+    c.creditBalance = next;
+    saveLocalDb(local);
   }
 
-  const local = loadLocalDb();
-  const c = local.customers.find((x) => x.id === cid);
-  if (c) {
-    c.creditBalance = Math.max(0, c.creditBalance + delta);
-    saveLocalDb(local);
+  if (meta) {
+    await writeCreditLedgerEntry({
+      customerId: cid,
+      orderId: meta.orderId,
+      resetId: meta.resetId,
+      entryType: meta.entryType,
+      amount: delta,
+      balanceAfter: next,
+      note: meta.note,
+    });
   }
 }
 
@@ -474,6 +675,7 @@ async function insertOrderPaymentRecord(
       [orderId, amount, paymentMethod, createdAt]
     );
     return {
+      ...ENTITY_SCOPE_DEFAULTS,
       id: result.lastInsertId,
       orderId,
       amount,
@@ -485,6 +687,7 @@ async function insertOrderPaymentRecord(
 
   const local = loadLocalDb();
   const payment: OrderPayment = {
+    ...ENTITY_SCOPE_DEFAULTS,
     id: local.nextOrderPaymentId++,
     orderId,
     amount,
@@ -759,6 +962,21 @@ async function runMigrations(): Promise<void> {
       ]
     );
   }
+
+  for (const sql of SQLITE_V3_MIGRATIONS) {
+    try {
+      await db.execute(sql);
+    } catch {
+      /* kolon/tablo zaten var */
+    }
+  }
+  for (const sql of SQLITE_V4_MIGRATIONS) {
+    try {
+      await db.execute(sql);
+    } catch {
+      /* kolon/tablo zaten var */
+    }
+  }
 }
 
 async function seedServicePricesForProduct(
@@ -784,6 +1002,7 @@ async function seedServicePricesForProduct(
     );
     if (exists) continue;
     local.servicePrices.push({
+      ...ENTITY_SCOPE_DEFAULTS,
       id: local.nextServicePriceId++,
       productId,
       serviceType: st,
@@ -838,9 +1057,10 @@ async function seedAll(): Promise<void> {
   if (local.products.length === 0) {
     SEED_PRODUCTS.forEach((p, index) => {
       const id = local.nextProductId++;
-      local.products.push({ id, ...p, sortOrder: index });
+      local.products.push({ ...ENTITY_SCOPE_DEFAULTS, id, ...p, sortOrder: index });
       for (const st of SERVICE_TYPES) {
         local.servicePrices.push({
+          ...ENTITY_SCOPE_DEFAULTS,
           id: local.nextServicePriceId++,
           productId: id,
           serviceType: st,
@@ -850,11 +1070,13 @@ async function seedAll(): Promise<void> {
     });
     saveLocalDb(local);
   }
+  await ensureWhatsappTemplatesSeeded();
 }
 
 export async function initDatabase(): Promise<void> {
   if (isTauri()) await runMigrations();
   await seedAll();
+  await ensureWhatsappTemplatesSeeded();
 }
 
 export async function getProducts(): Promise<Product[]> {
@@ -918,7 +1140,7 @@ export async function updateServicePrice(
        ON CONFLICT(product_id, service_type) DO UPDATE SET price = excluded.price`,
       [productId, serviceType, price]
     );
-    triggerSyncPush();
+    await enqueueServicePriceSync(productId, serviceType);
     return;
   }
   const local = loadLocalDb();
@@ -928,12 +1150,14 @@ export async function updateServicePrice(
   if (idx >= 0) local.servicePrices[idx].price = price;
   else
     local.servicePrices.push({
+      ...ENTITY_SCOPE_DEFAULTS,
       id: local.nextServicePriceId++,
       productId,
       serviceType,
       price,
     });
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueServicePriceSync(productId, serviceType);
 }
 
 export async function updateProductBasePrice(
@@ -946,12 +1170,14 @@ export async function updateProductBasePrice(
       basePrice,
       productId,
     ]);
+    await enqueueProductSyncById(productId);
     return;
   }
   const local = loadLocalDb();
   const p = local.products.find((x) => x.id === productId);
   if (p) p.basePrice = basePrice;
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueProductSyncById(productId);
 }
 
 export function calculateServicePrice(
@@ -980,7 +1206,10 @@ export async function getCustomers(): Promise<Customer[]> {
     );
     return rows.map(mapCustomer);
   }
-  return loadLocalDb().customers;
+  const tenantId = getActiveTenantId();
+  const customers = loadLocalDb().customers;
+  if (!tenantId) return customers;
+  return customers.filter((c) => entityBelongsToTenant(c, tenantId));
 }
 
 export async function getCustomerByPhone(
@@ -995,7 +1224,7 @@ export async function getCustomerByPhone(
     );
     return rows[0] ? mapCustomer(rows[0]) : null;
   }
-  return (
+  return tenantGuard(
     loadLocalDb().customers.find((c) => c.phone === normalized) ?? null
   );
 }
@@ -1009,12 +1238,175 @@ export async function getCustomerById(id: number): Promise<Customer | null> {
     );
     return rows[0] ? mapCustomer(rows[0]) : null;
   }
-  return loadLocalDb().customers.find((c) => c.id === id) ?? null;
+  return tenantGuard(
+    loadLocalDb().customers.find((c) => c.id === id) ?? null
+  );
+}
+
+export async function getCustomerCreditLedger(
+  customerId: number
+): Promise<CreditLedgerEntry[]> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM credit_ledger WHERE customer_id = ? ORDER BY created_at DESC, id DESC",
+      [customerId]
+    );
+    return rows.map(mapCreditLedger);
+  }
+  return loadLocalDb()
+    .creditLedger.filter((e) => e.customerId === customerId)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() ||
+        b.id - a.id
+    );
+}
+
+export async function getLastActiveCreditReset(
+  customerId: number
+): Promise<CreditReset | null> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      `SELECT * FROM credit_resets
+       WHERE customer_id = ? AND undone_at IS NULL
+       ORDER BY reset_at DESC, id DESC LIMIT 1`,
+      [customerId]
+    );
+    return rows[0] ? mapCreditReset(rows[0]) : null;
+  }
+  const resets = loadLocalDb()
+    .creditResets.filter((r) => r.customerId === customerId && !r.undoneAt)
+    .sort(
+      (a, b) =>
+        new Date(b.resetAt).getTime() - new Date(a.resetAt).getTime() ||
+        b.id - a.id
+    );
+  return resets[0] ?? null;
+}
+
+export async function resetCustomerCredit(
+  customerId: number,
+  options: { note?: string; actorEmail?: string | null } = {}
+): Promise<CreditReset> {
+  const customer = await getCustomerById(customerId);
+  if (!customer) throw new Error("Müşteri bulunamadı");
+  if (customer.creditBalance <= 0.001) {
+    throw new Error("Sıfırlanacak cari bakiyesi yok.");
+  }
+
+  const amountReset = customer.creditBalance;
+  const organizationId =
+    getOrganizationId() ?? customer.organizationId ?? "";
+  const globalId = createGlobalId();
+  const resetAt = new Date().toISOString();
+  const note = options.note?.trim() ?? "";
+
+  let reset: CreditReset;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const result = await db.execute(
+      `INSERT INTO credit_resets (
+         global_id, organization_id, customer_id, amount_reset, reset_at, note
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [globalId, organizationId, customerId, amountReset, resetAt, note]
+    );
+    reset = {
+      id: result.lastInsertId,
+      globalId,
+      organizationId,
+      customerId,
+      amountReset,
+      resetAt,
+      undoneAt: null,
+      note,
+    };
+  } else {
+    const local = loadLocalDb();
+    reset = {
+      id: local.nextCreditResetId++,
+      globalId,
+      organizationId,
+      customerId,
+      amountReset,
+      resetAt,
+      undoneAt: null,
+      note,
+    };
+    local.creditResets.push(reset);
+    saveLocalDb(local, { silent: true });
+  }
+
+  await adjustCustomerCredit(customerId, customer.phone, -amountReset, {
+    resetId: reset.id,
+    entryType: "reset",
+    note: note || "Cari sıfırlama",
+  });
+
+  await appendAuditLogEntry({
+    entityType: "credit_reset",
+    entityGlobalId: reset.globalId,
+    action: "reset",
+    payload: { customerId, amountReset, previousBalance: amountReset },
+    actorEmail: options.actorEmail,
+  });
+
+  return reset;
+}
+
+export async function undoLastCreditReset(
+  customerId: number,
+  actorEmail?: string | null
+): Promise<void> {
+  const reset = await getLastActiveCreditReset(customerId);
+  if (!reset) throw new Error("Geri alınacak sıfırlama kaydı yok.");
+
+  const customer = await getCustomerById(customerId);
+  if (!customer) throw new Error("Müşteri bulunamadı");
+
+  const undoneAt = new Date().toISOString();
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute("UPDATE credit_resets SET undone_at = ? WHERE id = ?", [
+      undoneAt,
+      reset.id,
+    ]);
+  } else {
+    const local = loadLocalDb();
+    const row = local.creditResets.find((r) => r.id === reset.id);
+    if (row) row.undoneAt = undoneAt;
+    saveLocalDb(local, { silent: true });
+  }
+
+  await adjustCustomerCredit(customerId, customer.phone, reset.amountReset, {
+    resetId: reset.id,
+    entryType: "reset_undo",
+    note: "Sıfırlama geri alındı",
+  });
+
+  await appendAuditLogEntry({
+    entityType: "credit_reset",
+    entityGlobalId: reset.globalId,
+    action: "undo",
+    payload: {
+      customerId,
+      amountReset: reset.amountReset,
+      resetAt: reset.resetAt,
+    },
+    actorEmail,
+  });
 }
 
 export async function createCustomer(input: CustomerInput): Promise<Customer> {
   const now = new Date().toISOString();
   const tagId = input.tagId ?? 1;
+  const globalId = createGlobalId();
+  const orgId = isTauri()
+    ? (await getOrganizationSettings())?.organizationId ?? null
+    : loadLocalDb().organizationProfile?.organizationId ?? null;
   const data = {
     name: input.name.trim(),
     lastName: input.lastName?.trim() ?? "",
@@ -1030,9 +1422,11 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
   if (isTauri()) {
     const db = await getSqlDb();
     const result = await db.execute(
-      `INSERT INTO customers (name, last_name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO customers (global_id, organization_id, name, last_name, phone, notes, address, tag_id, credit_balance, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        globalId,
+        orgId,
         data.name,
         data.lastName,
         data.phone,
@@ -1044,14 +1438,40 @@ export async function createCustomer(input: CustomerInput): Promise<Customer> {
         data.updatedAt,
       ]
     );
-    triggerSyncPush();
-    return { id: result.lastInsertId, ...data };
+    const customer: Customer = {
+      ...ENTITY_SCOPE_DEFAULTS,
+      ...BRANCH_SCOPE_DEFAULT,
+      id: result.lastInsertId,
+      globalId,
+      organizationId: orgId,
+      ...data,
+    };
+    await enqueueSyncChange(
+      "customer",
+      globalId,
+      "create",
+      customerSyncPayload(customer)
+    );
+    return customer;
   }
 
   const local = loadLocalDb();
-  const customer: Customer = { id: local.nextCustomerId++, ...data };
+  const customer: Customer = {
+    ...ENTITY_SCOPE_DEFAULTS,
+    ...BRANCH_SCOPE_DEFAULT,
+    id: local.nextCustomerId++,
+    globalId,
+    organizationId: orgId,
+    ...data,
+  };
   local.customers.push(customer);
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueSyncChange(
+    "customer",
+    globalId,
+    "create",
+    customerSyncPayload(customer)
+  );
   return customer;
 }
 
@@ -1076,8 +1496,18 @@ export async function updateCustomer(
         id,
       ]
     );
-    triggerSyncPush();
-    return (await getCustomerById(id))!;
+    const updated = (await getCustomerById(id))!;
+    if (updated.globalId) {
+      await enqueueSyncChange(
+        "customer",
+        updated.globalId,
+        "update",
+        customerSyncPayload(updated)
+      );
+    } else {
+      triggerSyncPush();
+    }
+    return updated;
   }
 
   const local = loadLocalDb();
@@ -1089,7 +1519,17 @@ export async function updateCustomer(
   c.address = input.address?.trim() ?? "";
   c.tagId = tagId;
   c.updatedAt = now;
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  if (c.globalId) {
+    await enqueueSyncChange(
+      "customer",
+      c.globalId,
+      "update",
+      customerSyncPayload(c)
+    );
+  } else {
+    triggerSyncPush();
+  }
   return c;
 }
 
@@ -1101,14 +1541,23 @@ export async function deleteCustomer(id: number): Promise<void> {
     );
   }
 
+  const customer = await getCustomerById(id);
+  const globalId = customer?.globalId;
+
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute("DELETE FROM customers WHERE id = ?", [id]);
+    if (globalId) {
+      await enqueueSyncChange("customer", globalId, "delete", {});
+    }
     return;
   }
   const local = loadLocalDb();
   local.customers = local.customers.filter((c) => c.id !== id);
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  if (globalId) {
+    await enqueueSyncChange("customer", globalId, "delete", {});
+  }
 }
 
 export interface CustomerOrderSummary {
@@ -1151,6 +1600,35 @@ export async function getCustomerOrders(
   };
 }
 
+export async function getCustomerOrdersByPhone(
+  phone: string
+): Promise<CustomerOrderSummary> {
+  const trimmed = phone.trim();
+  if (!trimmed) return { orders: [], totalSpent: 0 };
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      `SELECT * FROM orders WHERE customer_phone = ? ORDER BY created_at DESC`,
+      [trimmed]
+    );
+    const orders = rows.map(mapOrder);
+    return {
+      orders,
+      totalSpent: orders.reduce((s, o) => s + o.totalAmount, 0),
+    };
+  }
+
+  const local = loadLocalDb();
+  const orders = local.orders
+    .filter((o) => o.customerPhone === trimmed)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return {
+    orders,
+    totalSpent: orders.reduce((s, o) => s + o.totalAmount, 0),
+  };
+}
+
 export async function getCustomerHistoryDetails(
   customerId: number
 ): Promise<CustomerHistoryEntry[]> {
@@ -1169,11 +1647,55 @@ export async function getCustomerHistoryDetails(
   );
 }
 
+// ─── Product color palette ───────────────────────────────────────────────────
+
+export async function getProductColorPalette(): Promise<ProductColorPreset[]> {
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<{ label: string; hex: string }>(
+      "SELECT label, hex FROM product_color_palette ORDER BY sort_order ASC, id ASC"
+    );
+    if (!rows.length) {
+      const defaults = cloneDefaultProductColorPalette();
+      await saveProductColorPalette(defaults);
+      return defaults;
+    }
+    return rows.map((r) => ({ label: r.label, hex: r.hex }));
+  }
+  const local = loadLocalDb();
+  if (local.productColorPalette?.length) {
+    return local.productColorPalette;
+  }
+  return cloneDefaultProductColorPalette();
+}
+
+export async function saveProductColorPalette(
+  palette: ProductColorPreset[]
+): Promise<void> {
+  const cleaned = palette
+    .map((p) => ({ label: p.label.trim(), hex: p.hex.trim() }))
+    .filter((p) => p.label && p.hex);
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute("DELETE FROM product_color_palette");
+    for (let i = 0; i < cleaned.length; i++) {
+      await db.execute(
+        "INSERT INTO product_color_palette (label, hex, sort_order) VALUES (?, ?, ?)",
+        [cleaned[i].label, cleaned[i].hex, i]
+      );
+    }
+    triggerSyncPush();
+    return;
+  }
+  const local = loadLocalDb();
+  local.productColorPalette = cleaned;
+  saveLocalDb(local);
+}
+
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
 function generateOrderNumber(seq: number): string {
-  const year = new Date().getFullYear();
-  return `CL-${year}-${String(seq).padStart(5, "0")}`;
+  return formatOrderNumber(new Date().getFullYear(), seq);
 }
 
 export interface CreateOrderInput {
@@ -1190,53 +1712,52 @@ export interface CreateOrderInput {
     productId: number;
     serviceType: ServiceType;
     subtotal: number;
+    originalPrice?: number;
+    salePrice?: number;
+    quantity?: number;
+    color?: string | null;
   }>;
+  paymentMode?: import("./schema").PaymentMode;
 }
 
 export async function createOrder(
   input: CreateOrderInput
 ): Promise<{ order: Order; items: OrderItem[] }> {
-  const subtotalAmount = input.items.reduce((sum, i) => sum + i.subtotal, 0);
-  const discountAmount = Math.min(
-    input.discountAmount ?? 0,
-    subtotalAmount
-  );
-  const totalAmount = Math.max(0, subtotalAmount - discountAmount);
-  const amountPaid = Math.min(
-    Math.max(0, input.amountPaid),
-    totalAmount
-  );
-  const balanceDue = Math.max(0, totalAmount - amountPaid);
-  const paymentStatus = derivePaymentStatus(amountPaid, totalAmount);
+  const financials = computeCreateOrderFinancials({
+    items: input.items,
+    amountPaid: input.amountPaid,
+    paymentMethod: input.paymentMethod,
+    paymentMode: input.paymentMode,
+    discountAmount: input.discountAmount,
+    orderStatus: input.orderStatus,
+    priority: input.priority,
+    couponCode: input.couponCode,
+  });
+  const {
+    subtotalAmount,
+    discountAmount,
+    totalAmount,
+    paymentMode,
+    amountPaid,
+    balanceDue,
+    paymentStatus,
+    orderStatus,
+    priority,
+    paymentMethod,
+    couponCode,
+  } = financials;
   const createdAt = new Date().toISOString();
-  const orderStatus = input.orderStatus ?? "preparing";
-  const priority = input.priority ?? "normal";
-  const paymentMethod = input.paymentMethod;
-  const couponCode = input.couponCode?.trim().toUpperCase() || null;
   let customerId = input.customerId ?? null;
+  const orgProfile = isTauri()
+    ? await getOrganizationSettings()
+    : loadLocalDb().organizationProfile;
+  const organizationId = orgProfile?.organizationId ?? null;
+  const orderGlobalId = createGlobalId();
 
   if (!customerId) {
     const existing = await getCustomerByPhone(input.customerPhone);
     if (existing) customerId = existing.id;
   }
-
-  const applyCreditToCustomer = async (cid: number) => {
-    if (balanceDue <= 0) return;
-    if (isTauri()) {
-      const db = await getSqlDb();
-      await db.execute(
-        "UPDATE customers SET credit_balance = credit_balance + ? WHERE id = ?",
-        [balanceDue, cid]
-      );
-      return;
-    }
-    const local = loadLocalDb();
-    const c = local.customers.find((x) => x.id === cid);
-    if (c) {
-      c.creditBalance += balanceDue;
-      saveLocalDb(local);
-    }
-  };
 
   if (isTauri()) {
     const db = await getSqlDb();
@@ -1246,9 +1767,15 @@ export async function createOrder(
     const orderNumber = generateOrderNumber((countRow[0]?.count ?? 0) + 1);
 
     const result = await db.execute(
-      `INSERT INTO orders (order_number, customer_id, customer_phone, subtotal_amount, discount_amount, total_amount, amount_paid, balance_due, payment_method, coupon_code, payment_status, order_status, delivery_date, priority, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (
+         global_id, organization_id, order_number, customer_id, customer_phone,
+         subtotal_amount, discount_amount, total_amount, amount_paid, balance_due,
+         payment_method, payment_mode, coupon_code, payment_status, order_status,
+         delivery_date, priority, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        orderGlobalId,
+        organizationId,
         orderNumber,
         customerId,
         input.customerPhone,
@@ -1258,6 +1785,7 @@ export async function createOrder(
         amountPaid,
         balanceDue,
         paymentMethod,
+        paymentMode,
         couponCode,
         paymentStatus,
         orderStatus,
@@ -1269,22 +1797,56 @@ export async function createOrder(
     const orderId = result.lastInsertId;
 
     const items: OrderItem[] = [];
-    for (const item of input.items) {
+    for (let index = 0; index < input.items.length; index++) {
+      const item = input.items[index];
+      const salePrice = item.salePrice ?? item.subtotal;
+      const originalPrice = item.originalPrice ?? salePrice;
+      const itemNumber = formatItemNumber(orderNumber, index + 1);
+      const itemGlobalId = createGlobalId();
       const itemResult = await db.execute(
-        `INSERT INTO order_items (order_id, product_id, service_type, subtotal)
-         VALUES (?, ?, ?, ?)`,
-        [orderId, item.productId, item.serviceType, item.subtotal]
+        `INSERT INTO order_items (
+           global_id, organization_id, order_id, product_id, item_number,
+           service_type, quantity, original_price, sale_price, subtotal, item_status, color
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          itemGlobalId,
+          organizationId,
+          orderId,
+          item.productId,
+          itemNumber,
+          item.serviceType,
+          item.quantity ?? 1,
+          originalPrice,
+          salePrice,
+          item.subtotal,
+          "received",
+          item.color ?? null,
+        ]
       );
       items.push({
         id: itemResult.lastInsertId,
+        globalId: itemGlobalId,
+        organizationId,
         orderId,
         productId: item.productId,
+        itemNumber,
         serviceType: item.serviceType,
+        quantity: item.quantity ?? 1,
+        originalPrice,
+        salePrice,
         subtotal: item.subtotal,
+        itemStatus: "received",
+        color: item.color ?? null,
       });
     }
 
-    if (customerId) await applyCreditToCustomer(customerId);
+    if (customerId && balanceDue > 0) {
+      await adjustCustomerCredit(customerId, input.customerPhone, balanceDue, {
+        orderId,
+        entryType: "order_debit",
+        note: `Sipariş ${orderNumber}`,
+      });
+    }
 
     if (amountPaid > 0) {
       await insertOrderPaymentRecord(
@@ -1295,10 +1857,11 @@ export async function createOrder(
       );
     }
 
-    triggerSyncPush();
-    return {
-      order: {
+    const orderRow: Order = {
         id: orderId,
+        globalId: orderGlobalId,
+        organizationId,
+        branchId: null,
         orderNumber,
         customerId,
         customerPhone: input.customerPhone,
@@ -1308,15 +1871,31 @@ export async function createOrder(
         amountPaid,
         balanceDue,
         paymentMethod,
+        paymentMode,
         couponCode,
         paymentStatus,
         orderStatus,
         deliveryDate: input.deliveryDate,
         priority,
         createdAt,
-      },
-      items,
-    };
+      };
+    const orderPayments = amountPaid > 0
+      ? await (async () => {
+          const rows = await (await getSqlDb()).select<Record<string, unknown>>(
+            "SELECT * FROM order_payments WHERE order_id = ?",
+            [orderId]
+          );
+          return rows.map(mapOrderPayment);
+        })()
+      : [];
+    await enqueueSyncChange(
+      "order",
+      orderGlobalId,
+      "create",
+      orderSyncPayload(orderRow, items, orderPayments),
+      true
+    );
+    return { order: orderRow, items };
   }
 
   const local = loadLocalDb();
@@ -1325,6 +1904,9 @@ export async function createOrder(
 
   const order: Order = {
     id: orderId,
+    globalId: orderGlobalId,
+    organizationId,
+    branchId: null,
     orderNumber,
     customerId,
     customerPhone: input.customerPhone,
@@ -1334,6 +1916,7 @@ export async function createOrder(
     amountPaid,
     balanceDue,
     paymentMethod,
+    paymentMode,
     couponCode,
     paymentStatus,
     orderStatus,
@@ -1343,25 +1926,39 @@ export async function createOrder(
   };
   local.orders.push(order);
 
-  const items: OrderItem[] = input.items.map((item) => {
+  const items: OrderItem[] = input.items.map((item, index) => {
+    const salePrice = item.salePrice ?? item.subtotal;
+    const originalPrice = item.originalPrice ?? salePrice;
     const row: OrderItem = {
       id: local.nextOrderItemId++,
+      globalId: createGlobalId(),
+      organizationId,
       orderId,
       productId: item.productId,
+      itemNumber: formatItemNumber(orderNumber, index + 1),
       serviceType: item.serviceType,
+      quantity: item.quantity ?? 1,
+      originalPrice,
+      salePrice,
       subtotal: item.subtotal,
+      itemStatus: "received",
+      color: item.color ?? null,
     };
     local.orderItems.push(row);
     return row;
   });
 
-  if (customerId) {
-    const c = local.customers.find((x) => x.id === customerId);
-    if (c && balanceDue > 0) c.creditBalance += balanceDue;
+  if (customerId && balanceDue > 0) {
+    await adjustCustomerCredit(customerId, input.customerPhone, balanceDue, {
+      orderId,
+      entryType: "order_debit",
+      note: `Sipariş ${orderNumber}`,
+    });
   }
 
   if (amountPaid > 0) {
     local.orderPayments.push({
+      ...ENTITY_SCOPE_DEFAULTS,
       id: local.nextOrderPaymentId++,
       orderId,
       amount: amountPaid,
@@ -1371,7 +1968,15 @@ export async function createOrder(
     });
   }
 
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  const payments = local.orderPayments.filter((p) => p.orderId === orderId);
+  await enqueueSyncChange(
+    "order",
+    orderGlobalId,
+    "create",
+    orderSyncPayload(order, items, payments),
+    true
+  );
   return { order, items };
 }
 
@@ -1410,18 +2015,25 @@ export async function upsertCustomerByPhone(
 
 async function enrichOrders(orders: Order[]): Promise<OrderWithMeta[]> {
   const customers = await getCustomers();
-  const customerMap = new Map(customers.map((c) => [c.id, c]));
-  const nameFor = (o: Order) => {
-    const c = o.customerId
-      ? customerMap.get(o.customerId)
-      : customers.find((x) => x.phone === o.customerPhone);
-    return c ? formatCustomerName(c) : undefined;
-  };
+  const palette = await getProductColorPalette();
+  const nameFor = (o: Order) =>
+    resolveCustomerNameForOrder(o, customers);
 
   if (isTauri()) {
     const db = await getSqlDb();
     return Promise.all(
       orders.map(async (o) => {
+        const itemRows = await db.select<{
+          color: string | null;
+          item_number: string;
+          item_status: string;
+        }>(
+          "SELECT color, item_number, item_status FROM order_items WHERE order_id = ?",
+          [o.id]
+        );
+        const readiness = countItemReadiness(
+          itemRows.map((r) => ({ itemStatus: r.item_status as ItemStatus }))
+        );
         const countRow = await db.select<{ count: number }>(
           "SELECT COUNT(*) as count FROM order_items WHERE order_id = ?",
           [o.id]
@@ -1430,17 +2042,41 @@ async function enrichOrders(orders: Order[]): Promise<OrderWithMeta[]> {
           ...o,
           itemCount: countRow[0]?.count ?? 0,
           customerName: nameFor(o),
+          itemColors: summarizeOrderItemColors(
+            itemRows.map((r) => r.color),
+            palette
+          ),
+          itemNumbers: itemRows
+            .map((r) => r.item_number)
+            .filter((n) => n && n.trim()),
+          itemReadyCount: readiness.ready,
+          itemActiveCount: readiness.total,
         };
       })
     );
   }
 
   const local = loadLocalDb();
-  return orders.map((o) => ({
-    ...o,
-    itemCount: local.orderItems.filter((i) => i.orderId === o.id).length,
-    customerName: nameFor(o),
-  }));
+  return orders.map((o) => {
+    const items = local.orderItems.filter((i) => i.orderId === o.id);
+    const readiness = countItemReadiness(
+      items.map((i) => ({ itemStatus: i.itemStatus as ItemStatus }))
+    );
+    return {
+      ...o,
+      itemCount: items.length,
+      customerName: nameFor(o),
+      itemColors: summarizeOrderItemColors(
+        items.map((i) => i.color),
+        palette
+      ),
+      itemNumbers: items
+        .map((i) => i.itemNumber)
+        .filter((n) => n && n.trim()),
+      itemReadyCount: readiness.ready,
+      itemActiveCount: readiness.total,
+    };
+  });
 }
 
 export async function getActiveOrders(): Promise<OrderWithMeta[]> {
@@ -1552,7 +2188,11 @@ export async function addOrderPayment(
 
   const amountPaid = order.amountPaid + payAmount;
   const balanceDue = Math.max(0, order.totalAmount - amountPaid);
-  const paymentStatus = derivePaymentStatus(amountPaid, order.totalAmount);
+  const paymentStatus = derivePaymentStatus(
+    amountPaid,
+    order.totalAmount,
+    order.paymentMode as PaymentMode
+  );
 
   await syncOrderPaymentTotals(orderId, {
     amountPaid,
@@ -1560,10 +2200,43 @@ export async function addOrderPayment(
     paymentStatus,
     paymentMethod,
   });
-  await adjustCustomerCredit(order.customerId, order.customerPhone, -payAmount);
+  await adjustCustomerCredit(order.customerId, order.customerPhone, -payAmount, {
+    orderId,
+    entryType: "payment_credit",
+    note: "Tahsilat",
+  });
 
-  triggerSyncPush();
+  await enqueueOrderSyncById(orderId, true);
   return payment;
+}
+
+export async function completeOrderDelivery(
+  orderId: number,
+  options: {
+    amount?: number;
+    paymentMethod?: PaymentMethod;
+    leaveOnCredit?: boolean;
+  } = {}
+): Promise<void> {
+  const order = await getOrderById(orderId);
+  if (!order) throw new Error("Sipariş bulunamadı");
+
+  if (order.orderStatus === "delivered") return;
+
+  const mustCollect =
+    order.paymentMode === "pay_on_delivery" && order.balanceDue > 0;
+
+  if (mustCollect && !options.leaveOnCredit) {
+    const amount = options.amount ?? 0;
+    if (amount <= 0 || !options.paymentMethod) {
+      throw new Error("Teslimatta ödeme için tahsilat bilgisi gerekli.");
+    }
+    await addOrderPayment(orderId, amount, options.paymentMethod);
+  } else if (options.amount && options.amount > 0 && options.paymentMethod) {
+    await addOrderPayment(orderId, options.amount, options.paymentMethod);
+  }
+
+  await updateOrderOrderStatus(orderId, "delivered");
 }
 
 export async function refundOrderPayment(paymentId: number): Promise<void> {
@@ -1593,7 +2266,11 @@ export async function refundOrderPayment(paymentId: number): Promise<void> {
 
   const amountPaid = Math.max(0, order.amountPaid - payment.amount);
   const balanceDue = Math.max(0, order.totalAmount - amountPaid);
-  const paymentStatus = derivePaymentStatus(amountPaid, order.totalAmount);
+  const paymentStatus = derivePaymentStatus(
+    amountPaid,
+    order.totalAmount,
+    order.paymentMode as PaymentMode
+  );
 
   await syncOrderPaymentTotals(payment.orderId, {
     amountPaid,
@@ -1603,10 +2280,15 @@ export async function refundOrderPayment(paymentId: number): Promise<void> {
   await adjustCustomerCredit(
     order.customerId,
     order.customerPhone,
-    payment.amount
+    payment.amount,
+    {
+      orderId: payment.orderId,
+      entryType: "adjustment",
+      note: "Ödeme iadesi",
+    }
   );
 
-  triggerSyncPush();
+  await enqueueOrderSyncById(payment.orderId, true);
 }
 
 /** @deprecated use addOrderPayment for partial payments */
@@ -1620,13 +2302,14 @@ export async function updateOrderPaymentStatus(
       "UPDATE orders SET payment_status = ? WHERE id = ?",
       [paymentStatus, orderId]
     );
-    triggerSyncPush();
+    await enqueueOrderSyncById(orderId, true);
     return;
   }
   const local = loadLocalDb();
   const o = local.orders.find((x) => x.id === orderId);
   if (o) (o as Order).paymentStatus = paymentStatus;
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueOrderSyncById(orderId, true);
 }
 
 export async function updateOrderOrderStatus(
@@ -1639,13 +2322,114 @@ export async function updateOrderOrderStatus(
       orderStatus,
       orderId,
     ]);
-    triggerSyncPush();
+    await enqueueOrderSyncById(orderId, true);
     return;
   }
   const local = loadLocalDb();
   const o = local.orders.find((x) => x.id === orderId);
   if (o) (o as Order).orderStatus = orderStatus;
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueOrderSyncById(orderId, true);
+}
+
+export async function updateOrderItemStatus(
+  itemId: number,
+  itemStatus: ItemStatus
+): Promise<void> {
+  let orderId: number | null = null;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<{ order_id: number }>(
+      "SELECT order_id FROM order_items WHERE id = ?",
+      [itemId]
+    );
+    orderId = rows[0]?.order_id ?? null;
+    if (!orderId) return;
+    await db.execute(
+      "UPDATE order_items SET item_status = ? WHERE id = ?",
+      [itemStatus, itemId]
+    );
+  } else {
+    const local = loadLocalDb();
+    const item = local.orderItems.find((i) => i.id === itemId);
+    if (!item) return;
+    orderId = item.orderId;
+    item.itemStatus = itemStatus;
+    saveLocalDb(local, { silent: true });
+  }
+
+  const order = await getOrderById(orderId);
+  if (!order || order.orderStatus === "delivered") {
+    await enqueueOrderSyncById(orderId, true);
+    return;
+  }
+
+  const items = await getOrderItemsForOrder(orderId);
+  const nextStatus = deriveOrderStatusFromItems(
+    items.map((i) => ({ itemStatus: i.itemStatus as ItemStatus })),
+    order.orderStatus as OrderStatus
+  );
+  if (nextStatus !== order.orderStatus) {
+    await updateOrderOrderStatus(orderId, nextStatus);
+    return;
+  }
+  await enqueueOrderSyncById(orderId, true);
+}
+
+export async function runGlobalSearch(query: string): Promise<GlobalSearchHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const [active, delivered, customers] = await Promise.all([
+    getActiveOrders(),
+    getDeliveredOrders(),
+    getCustomers(),
+  ]);
+
+  const orderHits: GlobalSearchHit[] = [];
+  const seenOrders = new Set<number>();
+  for (const order of [...active, ...delivered]) {
+    if (seenOrders.has(order.id)) continue;
+    if (
+      orderMatchesGlobalSearch(
+        {
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          itemNumbers: order.itemNumbers,
+        },
+        q
+      )
+    ) {
+      seenOrders.add(order.id);
+      orderHits.push({
+        kind: "order",
+        id: order.id,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        orderStatus: order.orderStatus,
+      });
+    }
+  }
+
+  const customerHits: GlobalSearchHit[] = customers
+    .filter((c) =>
+      customerMatchesGlobalSearch(
+        { name: c.name, lastName: c.lastName, phone: c.phone },
+        q
+      )
+    )
+    .map((c) => ({
+      kind: "customer" as const,
+      id: c.id,
+      name: c.name,
+      lastName: c.lastName,
+      phone: c.phone,
+    }));
+
+  return rankGlobalSearchHits([...orderHits, ...customerHits], q);
 }
 
 export async function getCustomerListMeta(
@@ -1723,25 +2507,51 @@ export async function createCustomerTag(
   const label = input.label.trim();
   const color = input.color;
 
+  const globalId = createGlobalId();
+  const orgId = getOrganizationId();
+
   if (isTauri()) {
     const db = await getSqlDb();
     const result = await db.execute(
-      "INSERT INTO customer_tags (slug, label, color) VALUES (?, ?, ?)",
-      [slug, label, color]
+      "INSERT INTO customer_tags (global_id, organization_id, slug, label, color) VALUES (?, ?, ?, ?, ?)",
+      [globalId, orgId, slug, label, color]
     );
-    triggerSyncPush();
-    return { id: result.lastInsertId, slug, label, color };
+    const tag: CustomerTag = {
+      ...ENTITY_SCOPE_DEFAULTS,
+      id: result.lastInsertId,
+      globalId,
+      organizationId: orgId,
+      slug,
+      label,
+      color,
+    };
+    await enqueueSyncChange(
+      "customer_tag",
+      globalId,
+      "create",
+      customerTagSyncPayload(tag)
+    );
+    return tag;
   }
 
   const local = loadLocalDb();
   const tag: CustomerTag = {
+    ...ENTITY_SCOPE_DEFAULTS,
     id: local.nextCustomerTagId++,
+    globalId,
+    organizationId: orgId,
     slug,
     label,
     color,
   };
   local.customerTags.push(tag);
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueSyncChange(
+    "customer_tag",
+    globalId,
+    "create",
+    customerTagSyncPayload(tag)
+  );
   return tag;
 }
 
@@ -1759,7 +2569,7 @@ export async function updateCustomerTag(
       "UPDATE customer_tags SET slug = ?, label = ?, color = ? WHERE id = ?",
       [slug, label, color, id]
     );
-    triggerSyncPush();
+    await enqueueCustomerTagSyncById(id);
     return (await getCustomerTagById(id))!;
   }
 
@@ -1768,7 +2578,8 @@ export async function updateCustomerTag(
   tag.slug = slug;
   tag.label = label;
   tag.color = color;
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueCustomerTagSyncById(id);
   return tag;
 }
 
@@ -1777,11 +2588,16 @@ export async function deleteCustomerTag(id: number): Promise<void> {
     throw new Error("Varsayılan etiketler silinemez.");
   }
 
+  const tag = await getCustomerTagById(id);
+  const globalId = tag ? (await persistCustomerTagScope(tag)).globalId : null;
+
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute("UPDATE customers SET tag_id = 1 WHERE tag_id = ?", [id]);
     await db.execute("DELETE FROM customer_tags WHERE id = ?", [id]);
-    triggerSyncPush();
+    if (globalId) {
+      await enqueueSyncChange("customer_tag", globalId, "delete", {});
+    }
     return;
   }
 
@@ -1790,7 +2606,10 @@ export async function deleteCustomerTag(id: number): Promise<void> {
     if (c.tagId === id) c.tagId = 1;
   });
   local.customerTags = local.customerTags.filter((t) => t.id !== id);
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  if (globalId) {
+    await enqueueSyncChange("customer_tag", globalId, "delete", {});
+  }
 }
 
 // ─── Coupons ─────────────────────────────────────────────────────────────────
@@ -1819,26 +2638,41 @@ export async function createCoupon(input: CouponInput): Promise<Coupon> {
   const active = input.active !== false ? 1 : 0;
   const value = Math.max(0, input.value);
 
+  const globalId = createGlobalId();
+  const orgId = getOrganizationId();
+
   if (isTauri()) {
     const db = await getSqlDb();
     const result = await db.execute(
-      "INSERT INTO coupons (code, type, value, active, created_at) VALUES (?, ?, ?, ?, ?)",
-      [code, input.type, value, active, createdAt]
+      "INSERT INTO coupons (global_id, organization_id, code, type, value, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [globalId, orgId, code, input.type, value, active, createdAt]
     );
-    triggerSyncPush();
-    return {
+    const coupon: Coupon = {
+      ...ENTITY_SCOPE_DEFAULTS,
       id: result.lastInsertId,
+      globalId,
+      organizationId: orgId,
       code,
       type: input.type,
       value,
       active,
       createdAt,
     };
+    await enqueueSyncChange(
+      "coupon",
+      globalId,
+      "create",
+      couponSyncPayload(coupon)
+    );
+    return coupon;
   }
 
   const local = loadLocalDb();
   const coupon: Coupon = {
+    ...ENTITY_SCOPE_DEFAULTS,
     id: local.nextCouponId++,
+    globalId,
+    organizationId: orgId,
     code,
     type: input.type,
     value,
@@ -1846,7 +2680,13 @@ export async function createCoupon(input: CouponInput): Promise<Coupon> {
     createdAt,
   };
   local.coupons.push(coupon);
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueSyncChange(
+    "coupon",
+    globalId,
+    "create",
+    couponSyncPayload(coupon)
+  );
   return coupon;
 }
 
@@ -1864,7 +2704,7 @@ export async function updateCoupon(
       "UPDATE coupons SET code = ?, type = ?, value = ?, active = ? WHERE id = ?",
       [code, input.type, value, active, id]
     );
-    triggerSyncPush();
+    await enqueueCouponSyncById(id);
     const rows = await db.select<Record<string, unknown>>(
       "SELECT * FROM coupons WHERE id = ?",
       [id]
@@ -1878,20 +2718,29 @@ export async function updateCoupon(
   coupon.type = input.type;
   coupon.value = value;
   coupon.active = active;
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueCouponSyncById(id);
   return coupon;
 }
 
 export async function deleteCoupon(id: number): Promise<void> {
+  const coupon = (await getCoupons()).find((c) => c.id === id);
+  const globalId = coupon ? (await persistCouponScope(coupon)).globalId : null;
+
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute("DELETE FROM coupons WHERE id = ?", [id]);
-    triggerSyncPush();
+    if (globalId) {
+      await enqueueSyncChange("coupon", globalId, "delete", {});
+    }
     return;
   }
   const local = loadLocalDb();
   local.coupons = local.coupons.filter((c) => c.id !== id);
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  if (globalId) {
+    await enqueueSyncChange("coupon", globalId, "delete", {});
+  }
 }
 
 export function calculateCouponDiscount(
@@ -1928,50 +2777,197 @@ export async function getCustomerCreditDebt(phone: string): Promise<number> {
   return customer?.creditBalance ?? 0;
 }
 
+// ─── WhatsApp şablonları ─────────────────────────────────────────────────────
+
+async function ensureWhatsappTemplatesSeeded(): Promise<void> {
+  const orgId = getOrganizationId() ?? "";
+  const now = new Date().toISOString();
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const count = await db.select<{ count: number }>(
+      "SELECT COUNT(*) as count FROM whatsapp_templates"
+    );
+    if ((count[0]?.count ?? 0) > 0) return;
+    for (const [slug, tpl] of Object.entries(DEFAULT_WHATSAPP_TEMPLATES)) {
+      await db.execute(
+        `INSERT INTO whatsapp_templates (
+           global_id, organization_id, slug, name, body, active, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+        [createGlobalId(), orgId, slug, tpl.name, tpl.body, now]
+      );
+    }
+    return;
+  }
+
+  const local = loadLocalDb();
+  if (local.whatsappTemplates.length > 0) return;
+  for (const [slug, tpl] of Object.entries(DEFAULT_WHATSAPP_TEMPLATES)) {
+    local.whatsappTemplates.push({
+      id: local.nextWhatsappTemplateId++,
+      globalId: createGlobalId(),
+      organizationId: orgId,
+      slug,
+      name: tpl.name,
+      body: tpl.body,
+      active: 1,
+      updatedAt: now,
+    });
+  }
+  saveLocalDb(local, { silent: true });
+}
+
+export async function getWhatsappTemplates(): Promise<WhatsappTemplate[]> {
+  await ensureWhatsappTemplatesSeeded();
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM whatsapp_templates ORDER BY id"
+    );
+    return rows.map(mapWhatsappTemplate);
+  }
+  return [...loadLocalDb().whatsappTemplates].sort((a, b) => a.id - b.id);
+}
+
+export async function getWhatsappTemplateBySlug(
+  slug: string
+): Promise<WhatsappTemplate | null> {
+  const templates = await getWhatsappTemplates();
+  return templates.find((t) => t.slug === slug && t.active === 1) ?? null;
+}
+
+export async function updateWhatsappTemplate(
+  id: number,
+  patch: Partial<Pick<WhatsappTemplate, "name" | "body" | "active">>
+): Promise<WhatsappTemplate> {
+  const updatedAt = new Date().toISOString();
+  let template: WhatsappTemplate | null = null;
+
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const rows = await db.select<Record<string, unknown>>(
+      "SELECT * FROM whatsapp_templates WHERE id = ?",
+      [id]
+    );
+    template = rows[0] ? mapWhatsappTemplate(rows[0]) : null;
+    if (!template) throw new Error("Şablon bulunamadı");
+    const next = {
+      ...template,
+      name: patch.name ?? template.name,
+      body: patch.body ?? template.body,
+      active: patch.active ?? template.active,
+      updatedAt,
+    };
+    await db.execute(
+      "UPDATE whatsapp_templates SET name = ?, body = ?, active = ?, updated_at = ? WHERE id = ?",
+      [next.name, next.body, next.active, next.updatedAt, id]
+    );
+    template = next;
+  } else {
+    const local = loadLocalDb();
+    const row = local.whatsappTemplates.find((t) => t.id === id);
+    if (!row) throw new Error("Şablon bulunamadı");
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.body !== undefined) row.body = patch.body;
+    if (patch.active !== undefined) row.active = patch.active;
+    row.updatedAt = updatedAt;
+    saveLocalDb(local, { silent: true });
+    template = row;
+  }
+
+  if (template.globalId) {
+    await enqueueSyncChange(
+      "whatsapp_template",
+      template.globalId,
+      "update",
+      whatsappTemplateSyncPayload(template),
+      true
+    );
+  }
+  return template;
+}
+
 // ─── Organization / Auth sync ────────────────────────────────────────────────
 
-export interface OrganizationInput {
-  companyName: string;
-  adminName: string;
-  email: string;
-  authToken: string;
-  trialEndsAt?: string;
-}
+export type { OrganizationInput } from "@cleanledger/shared/organization";
+import type { OrganizationInput } from "@cleanledger/shared/organization";
 
 export async function saveOrganizationSettings(
   input: OrganizationInput
 ): Promise<OrganizationSettings> {
   const updatedAt = new Date().toISOString();
-  const row = {
+  const email = input.email.trim();
+  const existing = await getOrganizationSettings();
+  const row = withLogoHash({
+    id: existing?.id ?? 1,
+    globalId: existing?.globalId ?? createGlobalId(),
+    organizationId:
+      input.organizationId?.trim() ||
+      existing?.organizationId ||
+      (email ? normalizeOrganizationId(email) : ""),
     companyName: input.companyName.trim(),
     adminName: input.adminName.trim(),
-    email: input.email.trim(),
+    email,
+    phone: input.phone?.trim() ?? "",
+    address: input.address?.trim() ?? "",
+    logoDataUrl: input.logoDataUrl ?? existing?.logoDataUrl ?? null,
+    logoHash: existing?.logoHash ?? null,
     authToken: input.authToken,
-    trialEndsAt: input.trialEndsAt ?? "",
+    trialEndsAt: input.trialEndsAt ?? existing?.trialEndsAt ?? "",
     updatedAt,
-  };
+  });
 
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute("DELETE FROM organization_settings");
     const result = await db.execute(
-      `INSERT INTO organization_settings (company_name, admin_name, email, auth_token, trial_ends_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO organization_settings (
+         global_id, organization_id, company_name, admin_name, email, phone, address,
+         logo_data_url, logo_hash, auth_token, trial_ends_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        row.globalId,
+        row.organizationId,
         row.companyName,
         row.adminName,
         row.email,
+        row.phone,
+        row.address,
+        row.logoDataUrl,
+        row.logoHash,
         row.authToken,
         row.trialEndsAt,
         row.updatedAt,
       ]
     );
-    return { id: result.lastInsertId, ...row };
+    const saved = { ...row, id: result.lastInsertId };
+    setOrganizationProfileCache(saved);
+    const orgEntityId = saved.globalId ?? saved.organizationId;
+    if (orgEntityId) {
+      await enqueueSyncChange(
+        "organization_settings",
+        orgEntityId,
+        "update",
+        organizationSyncPayload(saved, existing?.logoHash)
+      );
+    }
+    return saved;
   }
 
-  const settings: OrganizationSettings = { id: 1, ...row };
-  localStorage.setItem(ORG_STORAGE_KEY, JSON.stringify(settings));
-  return settings;
+  const local = loadLocalDb();
+  local.organizationProfile = { ...row, id: 1 };
+  saveLocalDb(local, { silent: true });
+  setOrganizationProfileCache(local.organizationProfile);
+  const orgEntityId = row.globalId ?? row.organizationId;
+  if (orgEntityId) {
+    await enqueueSyncChange(
+      "organization_settings",
+      orgEntityId,
+      "update",
+      organizationSyncPayload(row, existing?.logoHash)
+    );
+  }
+  return local.organizationProfile;
 }
 
 export async function getOrganizationSettings(): Promise<OrganizationSettings | null> {
@@ -1980,26 +2976,18 @@ export async function getOrganizationSettings(): Promise<OrganizationSettings | 
     const rows = await db.select<Record<string, unknown>>(
       "SELECT * FROM organization_settings ORDER BY id DESC LIMIT 1"
     );
-    if (!rows[0]) return null;
-    const r = rows[0];
-    return {
-      id: num(r.id),
-      companyName: String(r.company_name ?? r.companyName ?? ""),
-      adminName: String(r.admin_name ?? r.adminName ?? ""),
-      email: String(r.email ?? ""),
-      authToken: String(r.auth_token ?? r.authToken ?? ""),
-      trialEndsAt: String(r.trial_ends_at ?? r.trialEndsAt ?? ""),
-      updatedAt: String(r.updated_at ?? r.updatedAt ?? ""),
-    };
+    if (!rows[0]) {
+      setOrganizationProfileCache(null);
+      return null;
+    }
+    const org = mapOrganizationSettings(rows[0]);
+    setOrganizationProfileCache(org);
+    return org;
   }
 
-  try {
-    const raw = localStorage.getItem(ORG_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as OrganizationSettings;
-  } catch {
-    return null;
-  }
+  const local = loadLocalDb();
+  setOrganizationProfileCache(local.organizationProfile);
+  return local.organizationProfile;
 }
 
 export async function clearOrganizationSettings(): Promise<void> {
@@ -2007,7 +2995,11 @@ export async function clearOrganizationSettings(): Promise<void> {
     const db = await getSqlDb();
     await db.execute("DELETE FROM organization_settings");
   }
+  const local = loadLocalDb();
+  local.organizationProfile = null;
+  saveLocalDb(local);
   localStorage.removeItem(ORG_STORAGE_KEY);
+  localStorage.removeItem(SHOP_PROFILE_STORAGE_KEY);
 }
 
 // ─── Products CRUD ───────────────────────────────────────────────────────────
@@ -2023,6 +3015,9 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
   const iconName = input.iconName.trim() || "default";
   const basePrice = Math.max(0, input.basePrice);
 
+  const globalId = createGlobalId();
+  const orgId = getOrganizationId();
+
   if (isTauri()) {
     const db = await getSqlDb();
     const maxRow = await db.select<{ maxOrder: number }>(
@@ -2030,13 +3025,16 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     );
     const sortOrder = num(maxRow[0]?.maxOrder, -1) + 1;
     const result = await db.execute(
-      "INSERT INTO products (name, icon_name, base_price, sort_order) VALUES (?, ?, ?, ?)",
-      [name, iconName, basePrice, sortOrder],
+      "INSERT INTO products (global_id, organization_id, name, icon_name, base_price, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+      [globalId, orgId, name, iconName, basePrice, sortOrder],
     );
     await seedServicePricesForProduct(result.lastInsertId, basePrice);
-    triggerSyncPush();
+    await enqueueProductSyncById(result.lastInsertId, "create");
     return {
+      ...ENTITY_SCOPE_DEFAULTS,
       id: result.lastInsertId,
+      globalId,
+      organizationId: orgId,
       name,
       iconName,
       basePrice,
@@ -2051,17 +3049,28 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       -1,
     ) + 1;
   const id = local.nextProductId++;
-  const product: Product = { id, name, iconName, basePrice, sortOrder };
+  const product: Product = {
+    ...ENTITY_SCOPE_DEFAULTS,
+    id,
+    globalId,
+    organizationId: orgId,
+    name,
+    iconName,
+    basePrice,
+    sortOrder,
+  };
   local.products.push(product);
   for (const st of SERVICE_TYPES) {
     local.servicePrices.push({
+      ...ENTITY_SCOPE_DEFAULTS,
       id: local.nextServicePriceId++,
       productId: id,
       serviceType: st,
       price: defaultPriceForService(basePrice, st),
     });
   }
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  await enqueueProductSyncById(id, "create");
   return product;
 }
 
@@ -2086,10 +3095,17 @@ export async function deleteProduct(productId: number): Promise<void> {
     );
   }
 
+  const product = (await getProducts()).find((p) => p.id === productId);
+  const globalId = product
+    ? (await persistProductScope(product)).globalId
+    : null;
+
   if (isTauri()) {
     const db = await getSqlDb();
     await db.execute("DELETE FROM products WHERE id = ?", [productId]);
-    triggerSyncPush();
+    if (globalId) {
+      await enqueueSyncChange("product", globalId, "delete", {});
+    }
     return;
   }
 
@@ -2098,7 +3114,10 @@ export async function deleteProduct(productId: number): Promise<void> {
   local.servicePrices = local.servicePrices.filter(
     (price) => price.productId !== productId,
   );
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  if (globalId) {
+    await enqueueSyncChange("product", globalId, "delete", {});
+  }
 }
 
 export async function reorderProducts(orderedIds: number[]): Promise<void> {
@@ -2112,7 +3131,9 @@ export async function reorderProducts(orderedIds: number[]): Promise<void> {
         orderedIds[index],
       ]);
     }
-    triggerSyncPush();
+    for (const id of orderedIds) {
+      await enqueueProductSyncById(id);
+    }
     return;
   }
 
@@ -2127,7 +3148,10 @@ export async function reorderProducts(orderedIds: number[]): Promise<void> {
   local.products.sort(
     (a, b) => (a.sortOrder ?? a.id) - (b.sortOrder ?? b.id),
   );
-  saveLocalDb(local);
+  saveLocalDb(local, { silent: true });
+  for (const id of orderedIds) {
+    await enqueueProductSyncById(id);
+  }
 }
 
 // ─── Order items detail ──────────────────────────────────────────────────────
@@ -2259,12 +3283,33 @@ export interface RevenueReportSummary {
   collected: number;
   outstanding: number;
   refundedPayments: number;
+  catalogSubtotal: number;
+  linePriceAdjustments: number;
+  adjustedLineCount: number;
+}
+
+async function getOrderItemsForOrders(orderIds: number[]): Promise<OrderItem[]> {
+  if (!orderIds.length) return [];
+  if (isTauri()) {
+    const db = await getSqlDb();
+    const placeholders = orderIds.map(() => "?").join(",");
+    const rows = await db.select<Record<string, unknown>>(
+      `SELECT * FROM order_items WHERE order_id IN (${placeholders}) ORDER BY id`,
+      orderIds
+    );
+    return rows.map(mapOrderItem);
+  }
+  const idSet = new Set(orderIds);
+  return loadLocalDb().orderItems.filter((i) => idSet.has(i.orderId));
 }
 
 export async function getRevenueReportSummary(
   range: ReportDateRange
 ): Promise<RevenueReportSummary> {
   const orders = await getOrdersInDateRange(range);
+  const orderIds = orders.map((o) => o.id);
+  const items = await getOrderItemsForOrders(orderIds);
+  const lineMetrics = computeLinePriceMetrics(items);
   let refundedPayments = 0;
 
   if (isTauri()) {
@@ -2297,6 +3342,9 @@ export async function getRevenueReportSummary(
     collected: orders.reduce((s, o) => s + o.amountPaid, 0),
     outstanding: orders.reduce((s, o) => s + o.balanceDue, 0),
     refundedPayments,
+    catalogSubtotal: lineMetrics.catalogSubtotal,
+    linePriceAdjustments: lineMetrics.linePriceAdjustments,
+    adjustedLineCount: lineMetrics.adjustedLineCount,
   };
 }
 
@@ -2382,12 +3430,6 @@ export async function getOrderWorkReportRows(
 
 // ─── Cloud sync snapshot ─────────────────────────────────────────────────────
 
-export interface DatabaseSnapshot {
-  version: 2;
-  updatedAt: string;
-  data: LocalDb;
-}
-
 async function buildLocalDbFromTauri(): Promise<LocalDb> {
   const db = await getSqlDb();
   const products = (
@@ -2420,11 +3462,61 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
       "SELECT * FROM order_payments ORDER BY id"
     )
   ).map(mapOrderPayment);
+  const orgRows = await db.select<Record<string, unknown>>(
+    "SELECT * FROM organization_settings ORDER BY id DESC LIMIT 1"
+  );
+  const organizationProfile = orgRows[0]
+    ? mapOrganizationSettings(orgRows[0])
+    : null;
+  const syncRows = await db.select<Record<string, unknown>>(
+    "SELECT * FROM sync_queue ORDER BY client_updated_at"
+  );
+  const syncQueue = syncRows.map((row) => {
+    const mapped = mapSyncQueueRow(row);
+    return {
+      ...mapped,
+      entityType: mapped.entityType as SyncEntityType,
+      operation: mapped.operation as SyncOperation,
+    };
+  });
+  const creditLedger = (
+    await db.select<Record<string, unknown>>(
+      "SELECT * FROM credit_ledger ORDER BY id"
+    )
+  ).map(mapCreditLedger);
+  const creditResets = (
+    await db.select<Record<string, unknown>>(
+      "SELECT * FROM credit_resets ORDER BY id"
+    )
+  ).map(mapCreditReset);
+  const auditLog = (
+    await db.select<Record<string, unknown>>(
+      "SELECT * FROM audit_log ORDER BY id"
+    )
+  ).map(mapAuditLog);
+  const whatsappTemplates = (
+    await db.select<Record<string, unknown>>(
+      "SELECT * FROM whatsapp_templates ORDER BY id"
+    )
+  ).map(mapWhatsappTemplate);
+
+  let productColorPalette: ProductColorPreset[];
+  try {
+    const paletteRows = await db.select<{ label: string; hex: string }>(
+      "SELECT label, hex FROM product_color_palette ORDER BY sort_order ASC, id ASC"
+    );
+    productColorPalette = paletteRows.length
+      ? paletteRows.map((r) => ({ label: r.label, hex: r.hex }))
+      : cloneDefaultProductColorPalette();
+  } catch {
+    productColorPalette = cloneDefaultProductColorPalette();
+  }
 
   const maxId = (arr: { id: number }[], fallback: number) =>
     arr.length ? Math.max(...arr.map((x) => x.id)) + 1 : fallback;
 
   return {
+    schemaVersion: LOCAL_DB_SCHEMA_VERSION,
     products,
     customers,
     customerTags: customerTags.length ? customerTags : seedDefaultTags(),
@@ -2433,6 +3525,14 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
     orders,
     orderItems,
     orderPayments,
+    organizationProfile,
+    creditLedger,
+    creditResets,
+    auditLog,
+    whatsappTemplates,
+    syncQueue,
+    orderNumberSequences: [],
+    productColorPalette,
     nextProductId: maxId(products, 1),
     nextCustomerId: maxId(customers, 1),
     nextCustomerTagId: maxId(customerTags, 5),
@@ -2442,6 +3542,10 @@ async function buildLocalDbFromTauri(): Promise<LocalDb> {
     nextOrderItemId: maxId(orderItems, 1),
     nextOrderPaymentId: maxId(orderPayments, 1),
     nextOrderNumber: orders.length + 1,
+    nextCreditLedgerId: maxId(creditLedger, 1),
+    nextCreditResetId: maxId(creditResets, 1),
+    nextAuditLogId: maxId(auditLog, 1),
+    nextWhatsappTemplateId: maxId(whatsappTemplates, 1),
   };
 }
 
@@ -2450,11 +3554,24 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
   await db.execute("DELETE FROM order_items");
   await db.execute("DELETE FROM order_payments");
   await db.execute("DELETE FROM orders");
+  await db.execute("DELETE FROM credit_ledger");
+  await db.execute("DELETE FROM credit_resets");
+  await db.execute("DELETE FROM audit_log");
+  await db.execute("DELETE FROM whatsapp_templates");
   await db.execute("DELETE FROM service_prices");
   await db.execute("DELETE FROM customers");
   await db.execute("DELETE FROM coupons");
   await db.execute("DELETE FROM customer_tags");
   await db.execute("DELETE FROM products");
+  await db.execute("DELETE FROM product_color_palette");
+
+  for (let pi = 0; pi < (data.productColorPalette ?? cloneDefaultProductColorPalette()).length; pi++) {
+    const preset = (data.productColorPalette ?? cloneDefaultProductColorPalette())[pi];
+    await db.execute(
+      "INSERT INTO product_color_palette (label, hex, sort_order) VALUES (?, ?, ?)",
+      [preset.label, preset.hex, pi]
+    );
+  }
 
   for (const t of data.customerTags ?? seedDefaultTags()) {
     await db.execute(
@@ -2498,12 +3615,45 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
       [sp.id, sp.productId, sp.serviceType, sp.price]
     );
   }
+  if (data.organizationProfile) {
+    await db.execute("DELETE FROM organization_settings");
+    const org = data.organizationProfile;
+    const orgRow = withLogoHash(org);
+    await db.execute(
+      `INSERT INTO organization_settings (
+         id, global_id, organization_id, company_name, admin_name, email, phone, address,
+         logo_data_url, logo_hash, auth_token, trial_ends_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        orgRow.id,
+        orgRow.globalId,
+        orgRow.organizationId,
+        orgRow.companyName,
+        orgRow.adminName,
+        orgRow.email,
+        orgRow.phone ?? "",
+        orgRow.address ?? "",
+        orgRow.logoDataUrl,
+        orgRow.logoHash,
+        orgRow.authToken,
+        orgRow.trialEndsAt,
+        orgRow.updatedAt,
+      ]
+    );
+  }
+
   for (const o of data.orders) {
     await db.execute(
-      `INSERT INTO orders (id, order_number, customer_id, customer_phone, subtotal_amount, discount_amount, total_amount, amount_paid, balance_due, payment_method, coupon_code, payment_status, order_status, delivery_date, priority, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (
+         id, global_id, organization_id, order_number, customer_id, customer_phone,
+         subtotal_amount, discount_amount, total_amount, amount_paid, balance_due,
+         payment_method, payment_mode, coupon_code, payment_status, order_status,
+         delivery_date, priority, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         o.id,
+        o.globalId,
+        o.organizationId,
         o.orderNumber,
         o.customerId,
         o.customerPhone,
@@ -2513,6 +3663,7 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
         o.amountPaid ?? (o.paymentStatus === "paid" ? o.totalAmount : 0),
         o.balanceDue ?? 0,
         o.paymentMethod ?? "cash",
+        o.paymentMode ?? o.paymentMethod ?? "cash",
         o.couponCode,
         o.paymentStatus,
         o.orderStatus,
@@ -2524,8 +3675,25 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
   }
   for (const i of data.orderItems) {
     await db.execute(
-      "INSERT INTO order_items (id, order_id, product_id, service_type, subtotal) VALUES (?, ?, ?, ?, ?)",
-      [i.id, i.orderId, i.productId, i.serviceType, i.subtotal]
+      `INSERT INTO order_items (
+         id, global_id, organization_id, order_id, product_id, item_number,
+         service_type, quantity, original_price, sale_price, subtotal, item_status, color
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        i.id,
+        i.globalId,
+        i.organizationId,
+        i.orderId,
+        i.productId,
+        i.itemNumber ?? "",
+        i.serviceType,
+        i.quantity ?? 1,
+        i.originalPrice ?? i.subtotal,
+        i.salePrice ?? i.subtotal,
+        i.subtotal,
+        i.itemStatus ?? "received",
+        i.color ?? null,
+      ]
     );
   }
   for (const p of data.orderPayments ?? []) {
@@ -2542,12 +3710,461 @@ async function applyLocalDbToTauri(data: LocalDb): Promise<void> {
       ]
     );
   }
+  for (const entry of data.creditLedger ?? []) {
+    await db.execute(
+      `INSERT INTO credit_ledger (
+         id, global_id, organization_id, customer_id, order_id, reset_id,
+         entry_type, amount, balance_after, note, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        entry.id,
+        entry.globalId,
+        entry.organizationId,
+        entry.customerId,
+        entry.orderId,
+        entry.resetId,
+        entry.entryType,
+        entry.amount,
+        entry.balanceAfter,
+        entry.note ?? "",
+        entry.createdAt,
+      ]
+    );
+  }
+  for (const reset of data.creditResets ?? []) {
+    await db.execute(
+      `INSERT INTO credit_resets (
+         id, global_id, organization_id, customer_id, amount_reset, reset_at, undone_at, note
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        reset.id,
+        reset.globalId,
+        reset.organizationId,
+        reset.customerId,
+        reset.amountReset,
+        reset.resetAt,
+        reset.undoneAt,
+        reset.note ?? "",
+      ]
+    );
+  }
+  for (const log of data.auditLog ?? []) {
+    await db.execute(
+      `INSERT INTO audit_log (
+         id, global_id, organization_id, entity_type, entity_global_id,
+         action, payload, actor_email, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        log.id,
+        log.globalId,
+        log.organizationId,
+        log.entityType,
+        log.entityGlobalId,
+        log.action,
+        log.payload ?? "{}",
+        log.actorEmail,
+        log.createdAt,
+      ]
+    );
+  }
+  for (const tpl of data.whatsappTemplates ?? []) {
+    await db.execute(
+      `INSERT INTO whatsapp_templates (
+         id, global_id, organization_id, slug, name, body, active, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        tpl.id,
+        tpl.globalId,
+        tpl.organizationId,
+        tpl.slug,
+        tpl.name,
+        tpl.body,
+        tpl.active ?? 1,
+        tpl.updatedAt,
+      ]
+    );
+  }
+}
+
+export type { SyncQueueEntry };
+
+async function persistProductScope(product: Product): Promise<Product> {
+  const orgId = getOrganizationId();
+  const globalId = product.globalId ?? createGlobalId();
+  const organizationId = product.organizationId ?? orgId;
+  if (product.globalId === globalId && product.organizationId === organizationId) {
+    return product;
+  }
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute(
+      "UPDATE products SET global_id = ?, organization_id = ? WHERE id = ?",
+      [globalId, organizationId, product.id]
+    );
+  } else {
+    const local = loadLocalDb();
+    const row = local.products.find((p) => p.id === product.id);
+    if (row) {
+      row.globalId = globalId;
+      row.organizationId = organizationId;
+      saveLocalDb(local, { silent: true });
+    }
+  }
+  return { ...product, globalId, organizationId };
+}
+
+async function persistCouponScope(coupon: Coupon): Promise<Coupon> {
+  const orgId = getOrganizationId();
+  const globalId = coupon.globalId ?? createGlobalId();
+  const organizationId = coupon.organizationId ?? orgId;
+  if (coupon.globalId === globalId && coupon.organizationId === organizationId) {
+    return coupon;
+  }
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute(
+      "UPDATE coupons SET global_id = ?, organization_id = ? WHERE id = ?",
+      [globalId, organizationId, coupon.id]
+    );
+  } else {
+    const local = loadLocalDb();
+    const row = local.coupons.find((c) => c.id === coupon.id);
+    if (row) {
+      row.globalId = globalId;
+      row.organizationId = organizationId;
+      saveLocalDb(local, { silent: true });
+    }
+  }
+  return { ...coupon, globalId, organizationId };
+}
+
+async function persistCustomerTagScope(tag: CustomerTag): Promise<CustomerTag> {
+  const orgId = getOrganizationId();
+  const globalId = tag.globalId ?? createGlobalId();
+  const organizationId = tag.organizationId ?? orgId;
+  if (tag.globalId === globalId && tag.organizationId === organizationId) {
+    return tag;
+  }
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute(
+      "UPDATE customer_tags SET global_id = ?, organization_id = ? WHERE id = ?",
+      [globalId, organizationId, tag.id]
+    );
+  } else {
+    const local = loadLocalDb();
+    const row = local.customerTags.find((t) => t.id === tag.id);
+    if (row) {
+      row.globalId = globalId;
+      row.organizationId = organizationId;
+      saveLocalDb(local, { silent: true });
+    }
+  }
+  return { ...tag, globalId, organizationId };
+}
+
+async function persistServicePriceScope(
+  servicePrice: ServicePrice
+): Promise<ServicePrice> {
+  const orgId = getOrganizationId();
+  const globalId = servicePrice.globalId ?? createGlobalId();
+  const organizationId = servicePrice.organizationId ?? orgId;
+  if (
+    servicePrice.globalId === globalId &&
+    servicePrice.organizationId === organizationId
+  ) {
+    return servicePrice;
+  }
+  if (isTauri()) {
+    const db = await getSqlDb();
+    await db.execute(
+      "UPDATE service_prices SET global_id = ?, organization_id = ? WHERE id = ?",
+      [globalId, organizationId, servicePrice.id]
+    );
+  } else {
+    const local = loadLocalDb();
+    const row = local.servicePrices.find((sp) => sp.id === servicePrice.id);
+    if (row) {
+      row.globalId = globalId;
+      row.organizationId = organizationId;
+      saveLocalDb(local, { silent: true });
+    }
+  }
+  return { ...servicePrice, globalId, organizationId };
+}
+
+async function getServicePricesForProduct(
+  productId: number
+): Promise<ServicePrice[]> {
+  return (await getServicePrices()).filter((sp) => sp.productId === productId);
+}
+
+async function enqueueProductSyncById(
+  productId: number,
+  operation: SyncOperation = "update",
+  immediate = false
+): Promise<void> {
+  const product = (await getProducts()).find((p) => p.id === productId);
+  if (!product) return;
+  const scoped = await persistProductScope(product);
+  if (!scoped.globalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  const prices = await getServicePricesForProduct(productId);
+  const scopedPrices = await Promise.all(
+    prices.map((price) => persistServicePriceScope(price))
+  );
+  await enqueueSyncChange(
+    "product",
+    scoped.globalId,
+    operation,
+    productSyncPayload(scoped, scopedPrices),
+    immediate
+  );
+}
+
+async function enqueueCouponSyncById(
+  couponId: number,
+  operation: SyncOperation = "update",
+  immediate = false
+): Promise<void> {
+  const coupon = (await getCoupons()).find((c) => c.id === couponId);
+  if (!coupon) return;
+  const scoped = await persistCouponScope(coupon);
+  if (!scoped.globalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  await enqueueSyncChange(
+    "coupon",
+    scoped.globalId,
+    operation,
+    couponSyncPayload(scoped),
+    immediate
+  );
+}
+
+async function enqueueCustomerTagSyncById(
+  tagId: number,
+  operation: SyncOperation = "update",
+  immediate = false
+): Promise<void> {
+  const tag = await getCustomerTagById(tagId);
+  if (!tag) return;
+  const scoped = await persistCustomerTagScope(tag);
+  if (!scoped.globalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  await enqueueSyncChange(
+    "customer_tag",
+    scoped.globalId,
+    operation,
+    customerTagSyncPayload(scoped),
+    immediate
+  );
+}
+
+async function enqueueServicePriceSync(
+  productId: number,
+  serviceType: ServiceType,
+  immediate = false
+): Promise<void> {
+  const product = (await getProducts()).find((p) => p.id === productId);
+  if (!product) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  const scopedProduct = await persistProductScope(product);
+  if (!scopedProduct.globalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  const servicePrice = (await getServicePricesForProduct(productId)).find(
+    (sp) => sp.serviceType === serviceType
+  );
+  if (!servicePrice) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  const scopedPrice = await persistServicePriceScope(servicePrice);
+  if (!scopedPrice.globalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  await enqueueSyncChange(
+    "service_price",
+    scopedPrice.globalId,
+    "update",
+    servicePriceSyncPayload(scopedPrice, scopedProduct.globalId),
+    immediate
+  );
+}
+
+async function enqueueOrderSyncById(
+  orderId: number,
+  immediate = false
+): Promise<void> {
+  const order = await getOrderById(orderId);
+  if (!order?.globalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+  const items = await getOrderItemsForOrder(orderId);
+  const payments = await getOrderPayments(orderId);
+  await enqueueSyncChange(
+    "order",
+    order.globalId,
+    "update",
+    orderSyncPayload(order, items, payments),
+    immediate
+  );
+}
+
+export function getOrganizationId(): string | null {
+  const tenant = getActiveTenantId();
+  if (tenant) return tenant;
+  if (isTauri()) return organizationProfileCache?.organizationId?.trim() || null;
+  return loadLocalDb().organizationProfile?.organizationId?.trim() || null;
+}
+
+async function readTauriSyncQueue(): Promise<SyncQueueEntry[]> {
+  const db = await getSqlDb();
+  const rows = await db.select<Record<string, unknown>>(
+    "SELECT * FROM sync_queue WHERE synced_at IS NULL ORDER BY client_updated_at"
+  );
+  return rows.map((row) => {
+    const mapped = mapSyncQueueRow(row);
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = JSON.parse(mapped.payload || "{}") as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+    return {
+      id: mapped.id,
+      organizationId: mapped.organizationId,
+      entityType: mapped.entityType as SyncEntityType,
+      entityGlobalId: mapped.entityGlobalId,
+      operation: mapped.operation as SyncOperation,
+      payload,
+      clientUpdatedAt: mapped.clientUpdatedAt,
+      syncedAt: mapped.syncedAt,
+    };
+  });
+}
+
+async function writeTauriSyncQueueEntry(entry: SyncQueueEntry): Promise<void> {
+  const db = await getSqlDb();
+  const existing = await db.select<{ id: string }>(
+    `SELECT id FROM sync_queue WHERE entity_type = ? AND entity_global_id = ? AND synced_at IS NULL LIMIT 1`,
+    [entry.entityType, entry.entityGlobalId]
+  );
+  const entryId = existing[0]?.id ?? entry.id;
+  await db.execute(
+    `DELETE FROM sync_queue WHERE entity_type = ? AND entity_global_id = ? AND synced_at IS NULL`,
+    [entry.entityType, entry.entityGlobalId]
+  );
+  await db.execute(
+    `INSERT INTO sync_queue (id, organization_id, entity_type, entity_global_id, operation, payload, client_updated_at, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+    [
+      entryId,
+      entry.organizationId,
+      entry.entityType,
+      entry.entityGlobalId,
+      entry.operation,
+      JSON.stringify(entry.payload),
+      entry.clientUpdatedAt,
+    ]
+  );
+}
+
+export async function getPendingSyncChanges(): Promise<SyncQueueEntry[]> {
+  if (isTauri()) return readTauriSyncQueue();
+  return getPendingSyncQueue(loadLocalDb());
+}
+
+export async function getPendingSyncCount(): Promise<number> {
+  return (await getPendingSyncChanges()).length;
+}
+
+export async function enqueueSyncChange(
+  entityType: SyncEntityType,
+  entityGlobalId: string,
+  operation: SyncOperation,
+  payload: Record<string, unknown>,
+  immediate = false
+): Promise<void> {
+  const organizationId = getOrganizationId();
+  if (!organizationId || !entityGlobalId) {
+    triggerSyncPush(immediate);
+    return;
+  }
+
+  const clientUpdatedAt = new Date().toISOString();
+  if (isTauri()) {
+    const entry: SyncQueueEntry = {
+      id: createGlobalId(),
+      organizationId,
+      entityType,
+      entityGlobalId,
+      operation,
+      payload,
+      clientUpdatedAt,
+      syncedAt: null,
+    };
+    await writeTauriSyncQueueEntry(entry);
+  } else {
+    const updated = upsertSyncQueueEntry(loadLocalDb(), {
+      organizationId,
+      entityType,
+      entityGlobalId,
+      operation,
+      payload,
+      clientUpdatedAt,
+    });
+    saveLocalDb(updated, { silent: true });
+  }
+  triggerSyncPush(immediate);
+}
+
+export async function markSyncChangesSynced(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const syncedAt = new Date().toISOString();
+  if (isTauri()) {
+    const db = await getSqlDb();
+    for (const id of ids) {
+      await db.execute(`UPDATE sync_queue SET synced_at = ? WHERE id = ?`, [
+        syncedAt,
+        id,
+      ]);
+    }
+    return;
+  }
+  saveLocalDb(markSyncQueueSynced(loadLocalDb(), ids, syncedAt), { silent: true });
+}
+
+export async function applyRemoteSyncChanges(
+  changes: SyncQueueEntry[]
+): Promise<void> {
+  if (!changes.length) return;
+  if (isTauri()) {
+    const data = await buildLocalDbFromTauri();
+    const merged = applySyncChanges(data, changes);
+    await applyLocalDbToTauri(merged);
+    window.dispatchEvent(new Event("cleanledger-sync"));
+    return;
+  }
+  const merged = applySyncChanges(loadLocalDb(), changes);
+  saveLocalDb(merged);
 }
 
 export async function exportDatabaseSnapshot(): Promise<DatabaseSnapshot> {
   const data = isTauri() ? await buildLocalDbFromTauri() : loadLocalDb();
   return {
-    version: 2,
+    version: LOCAL_DB_SCHEMA_VERSION,
     updatedAt: new Date().toISOString(),
     data,
   };
@@ -2556,13 +4173,15 @@ export async function exportDatabaseSnapshot(): Promise<DatabaseSnapshot> {
 export async function importDatabaseSnapshot(
   snapshot: DatabaseSnapshot
 ): Promise<void> {
-  const data = migrateLegacyDb(
-    snapshot.data as unknown as Record<string, unknown>
-  );
+  const { db: data, warnings } = safeMigrateRecordToV4(snapshot.data);
+  if (warnings.length) {
+    console.warn("[CleanLedger] Snapshot import uyarıları:", warnings);
+  }
   if (isTauri()) {
     await applyLocalDbToTauri(data);
     triggerSyncPush();
     return;
   }
-  saveLocalDb(data);
+  const tenantId = getActiveTenantId();
+  saveLocalDb(tenantId ? isolateLocalDbForTenant(data, tenantId) : data);
 }
